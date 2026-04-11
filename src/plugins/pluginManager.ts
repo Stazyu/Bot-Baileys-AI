@@ -218,7 +218,7 @@ export class PluginManager {
         return false;
       }
       const metadata = await context.socket.groupMetadata(jid);
-      const participant = metadata.participants.find((p: any) => p.id === participantJid);
+      const participant = metadata.participants.find((p) => p.phoneNumber === participantJid);
       return participant ? (participant.admin === 'admin' || participant.admin === 'superadmin') : false;
     } catch (error) {
       log.error(`❌ [PluginManager] Error checking group admin:`, error as object);
