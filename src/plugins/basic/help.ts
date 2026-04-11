@@ -1,4 +1,5 @@
 import type { CommandModule } from '../../types/index.js';
+import { getPrefixes } from '../../config/botConfig.js';
 
 const helpCommand: CommandModule = {
   config: {
@@ -18,6 +19,10 @@ const helpCommand: CommandModule = {
       return;
     }
 
+    // Get the matched prefix from the message
+    const prefixes = getPrefixes();
+    const matchedPrefix = context.simplified?.matchedPrefix || prefixes[0] || '!';
+
     const allCommands = pm.getAllCommands();
 
     if (args.length > 0) {
@@ -27,13 +32,13 @@ const helpCommand: CommandModule = {
 
       if (command) {
         const aliasesText = command.config.aliases
-          ? `\n*Aliases:* ${command.config.aliases.map((a: string) => `!${a}`).join(', ')}`
+          ? `\n*Aliases:* ${command.config.aliases.map((a: string) => `${matchedPrefix}${a}`).join(', ')}`
           : '';
 
         const helpText = `📖 *${command.config.name}*
 
 *Description:* ${command.config.description}
-*Usage:* ${command.config.usage}${aliasesText}
+*Usage:* ${command.config.usage.replace('!', matchedPrefix)}${aliasesText}
 *Category:* ${command.config.category || 'general'}
 *Admin Only:* ${command.config.adminOnly ? 'Yes' : 'No'}`;
 
@@ -42,7 +47,7 @@ const helpCommand: CommandModule = {
         });
       } else {
         await context.socket.sendMessage(context.fromJid, {
-          text: `❌ Command "!${commandName}" not found.`,
+          text: `❌ Command "${matchedPrefix}${commandName}" not found.`,
         });
       }
     } else {
@@ -63,12 +68,12 @@ const helpCommand: CommandModule = {
         helpText += `*${category.charAt(0).toUpperCase() + category.slice(1)}:*\n`;
         for (const cmd of commands) {
           const aliases = cmd.config.aliases ? ` (${cmd.config.aliases.join(', ')})` : '';
-          helpText += `• !${cmd.config.name}${aliases} - ${cmd.config.description}\n`;
+          helpText += `• ${matchedPrefix}${cmd.config.name}${aliases} - ${cmd.config.description}\n`;
         }
         helpText += '\n';
       }
 
-      helpText += `Use !help <command> for more information about a specific command.\n\nSession: ${context.sessionId}`;
+      helpText += `Use ${matchedPrefix}help <command> for more information about a specific command.\n\nSession: ${context.sessionId}`;
 
       await context.socket.sendMessage(context.fromJid, {
         text: helpText,

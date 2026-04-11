@@ -60,7 +60,9 @@ export class BotHandler {
     const mentions = type === 'extendedTextMessage' ? quotedInfo?.mentionedJid : undefined;
 
     /* ============ Meta User ============ */
-    const user_id = isGroup ? (msg?.key as any)?.participantAlt : (msg?.key as any)?.remoteJidAlt;
+    const user_id = isGroup
+      ? (msg?.key as any)?.participantAlt as string
+      : (msg?.key as any)?.remoteJidAlt as string;
     const pushName = msg.pushName;
 
     /* ============ Meta Group ============= */
