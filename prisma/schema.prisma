@@ -1,0 +1,48 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  sessionId String   @unique
+  phoneNumber String?
+  isActive  Boolean  @default(true)
+  authData  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages  Message[]
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  sessionId String
+  session   Session  @relation(fields: [sessionId], references: [sessionId], onDelete: Cascade)
+  
+  key       Json
+  message   Json
+  messageTimestamp BigInt
+  
+  fromMe    Boolean
+  pushName  String?
+  
+  createdAt DateTime @default(now())
+  
+  @@index([sessionId])
+}
+
+model BotConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
