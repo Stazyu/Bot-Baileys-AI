@@ -9,10 +9,14 @@ const helpCommand: CommandModule = {
     category: 'basic',
   },
   handler: async function (context, args: string[]): Promise<void> {
-    // Import plugin manager dynamically to avoid circular dependency
-    const { default: PluginManager } = await import('../pluginManager.js');
-    const pm = new PluginManager();
-    await pm.loadPlugins();
+    // Use the pluginManager from context if available
+    const pm = context.pluginManager;
+    if (!pm) {
+      await context.socket.sendMessage(context.fromJid, {
+        text: '❌ Plugin manager not available',
+      });
+      return;
+    }
 
     const allCommands = pm.getAllCommands();
 
@@ -70,8 +74,6 @@ const helpCommand: CommandModule = {
         text: helpText,
       });
     }
-
-    await pm.unloadPlugins();
   },
 };
 

@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import { createSessionWithHandler, loadActiveSessions, disconnectAllSessions, getAllSessions } from './session/sessionHelper.js';
+import prisma from './database/prisma.js';
 
 // Set console encoding to UTF-8 for emoji support on Windows
 if (process.platform === 'win32') {
@@ -48,12 +49,14 @@ async function main() {
   process.on('SIGINT', async () => {
     console.log('\n🛑 Shutting down bot...');
     await disconnectAllSessions();
+    await prisma.$disconnect();
     process.exit(0);
   });
 
   process.on('SIGTERM', async () => {
     console.log('\n🛑 Shutting down bot...');
     await disconnectAllSessions();
+    await prisma.$disconnect();
     process.exit(0);
   });
 }

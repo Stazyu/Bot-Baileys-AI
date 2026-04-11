@@ -151,7 +151,16 @@ async function downloadTikTok(url: string, socket: WASocket, fromJid: string): P
         `_Downloaded automatically_`;
 
       if (data.type === 'video' && data.video) {
-        const videoUrl = data.video.downloadAddr[0] || data.video.playAddr[0];
+        const videoUrl = (data.video.downloadAddr && data.video.downloadAddr.length > 0 ? data.video.downloadAddr[0] : null) ||
+          (data.video.playAddr && data.video.playAddr.length > 0 ? data.video.playAddr[0] : null);
+
+        if (!videoUrl) {
+          return {
+            success: false,
+            error: 'Gagal mengambil media dari TikTok: URL tidak ditemukan',
+          };
+        }
+
         await socket.sendMessage(fromJid, {
           video: { url: videoUrl },
           caption: caption,
@@ -162,7 +171,7 @@ async function downloadTikTok(url: string, socket: WASocket, fromJid: string): P
           url: videoUrl,
           type: 'video',
         };
-      } else if (data.type === 'image' && data.images) {
+      } else if (data.type === 'image' && data.images && data.images.length > 0) {
         const imageUrl = data.images[0];
         await socket.sendMessage(fromJid, {
           image: { url: imageUrl },

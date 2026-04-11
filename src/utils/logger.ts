@@ -11,7 +11,7 @@ const levelPriority: Record<string, number> = {
   debug: 4,
 };
 
-const currentLevel = levelPriority[logLevel] || 3;
+let currentLevel = levelPriority[logLevel] || 3;
 
 function shouldLog(level: string): boolean {
   return currentLevel >= (levelPriority[level] || 0);

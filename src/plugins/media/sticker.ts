@@ -30,17 +30,28 @@ const stickerCommand: CommandModule = {
 
     try {
       // Download the image from the message
-      const quoted = isQuotedImage ? message.message?.extendedTextMessage?.contextInfo?.quotedMessage : null;
-      if (!quoted) {
-        throw new Error('No quoted message found');
+      let imageMessage: any;
+
+      if (isQuotedImage) {
+        // Get quoted image message
+        const quoted = message.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+        if (!quoted || !quoted.imageMessage) {
+          throw new Error('No quoted image message found');
+        }
+        imageMessage = quoted.imageMessage;
+      } else if (isImage) {
+        // Get direct image message
+        imageMessage = message.message?.imageMessage;
+        if (!imageMessage) {
+          throw new Error('No image message found');
+        }
+      } else {
+        throw new Error('No image found in message');
       }
 
-      const type = Object.keys(quoted)[0];
-      const content = quoted;
-
       const stream = await downloadContentFromMessage(
-        content.imageMessage!,
-        type.replace('Message', '') as 'image'
+        imageMessage,
+        'image'
       )
 
       let buffer = Buffer.from([])

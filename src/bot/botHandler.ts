@@ -291,6 +291,7 @@ export class BotHandler {
           messageTimestamp: simplified.messageTimeStamp ? Number(simplified.messageTimeStamp) : undefined,
           message,
           simplified,
+          pluginManager: this.pluginManager,
         };
 
         const executed = await this.pluginManager.executeCommand(command, context, args);

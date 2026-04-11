@@ -1,6 +1,6 @@
-import type { CommandConfig } from './command.d.ts';
-import type { CommandHandler } from './command.d.ts';
-import type { CommandModule } from './command.d.ts';
+import type { CommandConfig } from './command.js';
+import type { CommandHandler } from './command.js';
+import type { CommandModule } from './command.js';
 
 export interface Plugin {
   name: string;

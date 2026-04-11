@@ -24,6 +24,8 @@ export interface SessionConfig {
 
 export class SessionManager {
   private sessions: Map<string, WASocket> = new Map();
+  private reconnectAttempts: Map<string, number> = new Map();
+  private maxReconnectAttempts = 5;
   private logger = pino(
     { level: 'silent' },
     pinoPretty({
@@ -117,14 +119,34 @@ export class SessionManager {
         );
 
         if (shouldReconnect) {
-          this.sessions.delete(sessionId);
-          await this.createSession(sessionId);
+          const attempts = this.reconnectAttempts.get(sessionId) || 0;
+
+          if (attempts >= this.maxReconnectAttempts) {
+            log.error(`Max reconnection attempts (${this.maxReconnectAttempts}) reached for session ${sessionId}`);
+            this.reconnectAttempts.delete(sessionId);
+            await this.deleteSessionFromDB(sessionId);
+            this.sessions.delete(sessionId);
+            return;
+          }
+
+          this.reconnectAttempts.set(sessionId, attempts + 1);
+          const backoffDelay = Math.min(1000 * Math.pow(2, attempts), 30000); // Max 30 seconds
+
+          log.info(`Reconnecting session ${sessionId} in ${backoffDelay}ms (attempt ${attempts + 1}/${this.maxReconnectAttempts})`);
+
+          setTimeout(async () => {
+            this.sessions.delete(sessionId);
+            await this.createSession(sessionId);
+          }, backoffDelay);
         } else {
           // Delete session from database if logged out
+          this.reconnectAttempts.delete(sessionId);
           await this.deleteSessionFromDB(sessionId);
           this.sessions.delete(sessionId);
         }
       } else if (connection === 'open') {
+        // Reset reconnection attempts on successful connection
+        this.reconnectAttempts.delete(sessionId);
         log.info(`Connection opened for session ${sessionId}`);
 
         // Update phone number in database

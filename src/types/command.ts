@@ -10,6 +10,7 @@ export interface CommandContext {
   messageTimestamp?: number;
   message: WAMessage;
   simplified?: SimplifiedMessage;
+  pluginManager?: any;
 }
 
 export interface CommandConfig {

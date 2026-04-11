@@ -120,7 +120,7 @@ export async function useMultiFileAuthStateDB(
       },
     },
     saveCreds: async () => {
-      saveState();
+      await saveState();
     },
   };
 }

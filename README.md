@@ -1,15 +1,18 @@
 # Bot-Baileys-AI
 
-Multi-session WhatsApp bot using Baileys with PostgreSQL database and Prisma ORM.
+Multi-session WhatsApp bot with plugin architecture, media download capabilities, and PostgreSQL database using Prisma ORM.
 
 ## Features
 
 - ✅ **Multi-session support**: Manage multiple WhatsApp sessions simultaneously
-- ✅ **PostgreSQL database**: Store session data and messages using Prisma ORM
+- ✅ **Plugin architecture**: Modular command system with category-based organization
+- ✅ **Media downloads**: Download content from Instagram, TikTok, YouTube
+- ✅ **Sticker creation**: Convert images/videos to WhatsApp stickers
+- ✅ **PostgreSQL database**: Store session data using Prisma ORM
 - ✅ **Auto-reconnection**: Automatically reconnect when connection is lost
-- ✅ **Message logging**: Store all messages in the database
-- ✅ **Event handling**: Handle messages, group events, and message updates
+- ✅ **Session management**: Create, list, and disconnect sessions via commands
 - ✅ **TypeScript**: Fully typed with TypeScript for better development experience
+- ✅ **Modified Baileys**: Using Baileys fork with button support
 
 ## Prerequisites
 
@@ -67,41 +70,91 @@ pnpm dev -- --session=my-session-id
 
 The bot will display a QR code in the terminal. Scan it with WhatsApp to authenticate.
 
-### Available Commands
+### Force clear session
 
-Once the bot is connected, you can use these commands in WhatsApp:
+To force clear and recreate a session:
+```bash
+pnpm dev -- --session=my-session-id --force-clear
+```
 
-- `!ping` - Test bot response
-- `!help` - Show help message
-- `!status` - Check bot status
+## Available Commands
+
+### Basic Commands
+- `!ping` / `!p` - Test bot response
+- `!help` / `!h` / `!menu` - Show available commands
+- `!status` / `!s` - Check bot status
+
+### Media Commands
+- `!ig <url>` - Download Instagram content
+- `!tiktok <url>` - Download TikTok video
+- `!yt <url>` - Download YouTube video
+- `!sticker` - Convert image/video to sticker (reply to media)
+
+### Session Commands (Admin Only)
+- `!create_session <id>` / `!cs <id>` - Create new session
+- `!list_sessions` / `!ls` - List all active sessions
+- `!disconnect_session <id>` / `!ds <id>` - Disconnect a session
 
 ## Project Structure
 
 ```
 Bot-Baileys-AI/
 ├── prisma/
-│   └── schema.prisma          # Prisma database schema
+│   └── schema.prisma              # Prisma database schema
 ├── src/
 │   ├── bot/
-│   │   └── botHandler.ts      # Bot message and event handler
+│   │   ├── autoDownload.ts        # Auto-download handler
+│   │   └── botHandler.ts          # Bot message and event handler
 │   ├── database/
-│   │   └── prisma.ts          # Prisma client configuration
+│   │   └── prisma.ts              # Prisma client configuration
+│   ├── plugins/
+│   │   ├── basic/                 # Basic command plugins
+│   │   │   ├── help.ts
+│   │   │   ├── ping.ts
+│   │   │   └── status.ts
+│   │   ├── media/                 # Media download plugins
+│   │   │   ├── instagram.ts
+│   │   │   ├── sticker.ts
+│   │   │   ├── tiktok.ts
+│   │   │   └── youtube.ts
+│   │   ├── session/               # Session management plugins
+│   │   ├── pluginManager.ts       # Plugin loader and executor
+│   │   └── README.md              # Plugin system documentation
 │   ├── session/
-│   │   └── sessionManager.ts # Multi-session management
-│   └── index.ts               # Main entry point
-├── .env.example               # Environment variables example
-├── package.json               # Project dependencies
-├── tsconfig.json              # TypeScript configuration
-└── README.md                  # This file
+│   │   ├── authStateDB.ts         # Auth state database management
+│   │   ├── sessionHelper.ts       # Session helper functions
+│   │   └── sessionManager.ts      # Multi-session management
+│   ├── types/                     # TypeScript type definitions
+│   └── index.ts                   # Main entry point
+├── .env.example                   # Environment variables example
+├── package.json                   # Project dependencies
+├── tsconfig.json                  # TypeScript configuration
+└── README.md                      # This file
 ```
 
 ## Database Schema
 
-The bot uses three main tables:
+The bot uses these main tables:
 
-- **Session**: Stores WhatsApp session information
+- **Session**: Stores WhatsApp session information and auth state
 - **Message**: Stores all messages sent/received
 - **BotConfig**: Stores bot configuration settings
+
+## Plugin System
+
+The bot uses a modular plugin system that allows easy extension of functionality. Plugins are organized by category:
+
+- **basic**: Core utility commands (ping, help, status)
+- **media**: Media download and processing commands
+- **session**: Session management commands
+
+### Adding a New Plugin
+
+1. Create a new file in the appropriate category folder (e.g., `src/plugins/basic/mycommand.ts`)
+2. Implement the `CommandModule` interface
+3. The plugin will be automatically loaded on bot restart
+
+See `src/plugins/README.md` for detailed plugin development guide.
 
 ## Development
 
@@ -115,35 +168,26 @@ pnpm build
 pnpm start
 ```
 
+### Type checking
+```bash
+pnpm type-check
+```
+
 ### Open Prisma Studio (database GUI)
 ```bash
 pnpm prisma:studio
 ```
 
-## Customization
+## Technology Stack
 
-### Adding custom commands
-
-Edit `src/bot/botHandler.ts` and add your custom commands in the `processMessage` method:
-
-```typescript
-if (text.toLowerCase() === '!mycommand') {
-  await this.socket.sendMessage(remoteJid, {
-    text: 'Your response here',
-  });
-}
-```
-
-### Handling different message types
-
-The bot handler already supports:
-- Text messages
-- Image messages
-- Video messages
-- Audio messages
-- Document messages
-
-You can extend this by adding more handlers in the `processMessage` method.
+- **Baileys**: WhatsApp Web API library (modified fork with button support)
+- **Prisma**: Type-safe ORM for PostgreSQL
+- **TypeScript**: Type-safe JavaScript
+- **pino**: Fast JSON logger
+- **nexo-aio-downloader**: All-in-one media downloader
+- **@tobyg74/tiktok-api-dl**: TikTok video downloader
+- **wa-sticker-formatter**: WhatsApp sticker creation
+- **link-preview-js**: Link preview generation
 
 ## Troubleshooting
 
@@ -153,9 +197,19 @@ You can extend this by adding more handlers in the `processMessage` method.
 - Ensure your firewall allows PostgreSQL connections
 
 ### Session not connecting
-- Delete the session folder in `sessions/` directory
-- Re-create the session using `--session=` flag
-- Scan the QR code again
+- Use `--force-clear` flag to reset the session
+- Re-scan the QR code
+- Check the session ID is valid
+
+### Plugin not loading
+- Ensure the plugin file is in the correct category folder
+- Check that the plugin implements the correct interface
+- Restart the bot to reload plugins
+
+### Media download errors
+- Verify the URL is correct and accessible
+- Some platforms may have rate limits or require authentication
+- Check console logs for specific error messages
 
 ### Database errors
 - Run `pnpm prisma:migrate` to ensure schema is up to date
