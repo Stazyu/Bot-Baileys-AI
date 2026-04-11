@@ -20,6 +20,7 @@ export interface CommandConfig {
   usage: string;
   category?: string;
   cooldown?: number;
+  ownerOnly?: boolean;
   adminOnly?: boolean;
   groupOnly?: boolean;
   privateOnly?: boolean;

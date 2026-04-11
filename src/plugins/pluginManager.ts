@@ -5,6 +5,7 @@ import { dirname } from 'path';
 import type { WASocket } from 'baileys';
 import { log } from '../utils/logger.js';
 import type { PluginModule, CommandContext, CommandConfig, CategoryPlugin, CommandModule } from '../types/index.js';
+import { isOwner } from '../config/botConfig.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -211,6 +212,20 @@ export class PluginManager {
     this.commandOnUnloadHooks = [];
   }
 
+  private async isGroupAdmin(context: CommandContext, jid: string, participantJid: string): Promise<boolean> {
+    try {
+      if (!jid.endsWith('@g.us')) {
+        return false;
+      }
+      const metadata = await context.socket.groupMetadata(jid);
+      const participant = metadata.participants.find((p: any) => p.id === participantJid);
+      return participant ? (participant.admin === 'admin' || participant.admin === 'superadmin') : false;
+    } catch (error) {
+      log.error(`❌ [PluginManager] Error checking group admin:`, error as object);
+      return false;
+    }
+  }
+
   async executeCommand(commandName: string, context: CommandContext, args: string[]): Promise<boolean> {
     // log.info(`🔍 [PluginManager] Looking for command: "${commandName}"`);
     // log.info(`📋 [PluginManager] Available commands:`, Array.from(this.commandMap.keys()));
@@ -230,12 +245,30 @@ export class PluginManager {
     // log.info(`✅ [PluginManager] Command found: "${resolvedCommand}" from plugin "${commandData.plugin}"`);
 
     // Check permissions
-    if (commandData.config.adminOnly && !context.fromMe) {
-      log.info(`🚫 [PluginManager] Permission denied: admin only`);
-      await context.socket.sendMessage(context.fromJid, {
-        text: '❌ This command is admin only',
-      });
-      return true;
+    if (commandData.config.ownerOnly) {
+      const participantJid = context.simplified?.user_id || context.fromJid;
+      const isAuthorizedOwner = context.fromMe || isOwner(participantJid);
+
+      if (!isAuthorizedOwner) {
+        log.info(`🚫 [PluginManager] Permission denied: owner only`);
+        await context.socket.sendMessage(context.fromJid, {
+          text: '❌ This command is owner only',
+        });
+        return true;
+      }
+    }
+    if (commandData.config.adminOnly) {
+      const isGroup = context.fromJid.endsWith('@g.us');
+      const participantJid = context.simplified?.user_id || context.fromJid;
+      const isAdmin = context.fromMe || (isGroup && await this.isGroupAdmin(context, context.fromJid, participantJid));
+
+      if (!isAdmin) {
+        log.info(`🚫 [PluginManager] Permission denied: admin only`);
+        await context.socket.sendMessage(context.fromJid, {
+          text: '❌ This command is admin only',
+        });
+        return true;
+      }
     }
 
     if (commandData.config.groupOnly && !context.fromJid.includes('@g.us')) {
@@ -268,7 +301,7 @@ export class PluginManager {
     }
   }
 
-  getCommand(name: string): { config: CommandConfig; plugin: string } | undefined {
+  public getCommand(name: string): { config: CommandConfig; plugin: string } | undefined {
     const resolvedCommand = this.aliasMap.get(name.toLowerCase()) || name.toLowerCase();
     const commandData = this.commandMap.get(resolvedCommand);
 
@@ -282,7 +315,7 @@ export class PluginManager {
     return undefined;
   }
 
-  getAllCommands(): Array<{ config: CommandConfig; plugin: string }> {
+  public getAllCommands(): Array<{ config: CommandConfig; plugin: string }> {
     const commands: Array<{ config: CommandConfig; plugin: string }> = [];
 
     for (const [name, data] of this.commandMap) {
@@ -295,7 +328,7 @@ export class PluginManager {
     return commands;
   }
 
-  getPlugins(): (PluginModule | CategoryPlugin)[] {
+  public getPlugins(): (PluginModule | CategoryPlugin)[] {
     return Array.from(this.plugins.values());
   }
 

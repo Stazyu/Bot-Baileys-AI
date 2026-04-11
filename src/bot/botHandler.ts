@@ -2,6 +2,7 @@ import { makeWASocket, BaileysEventMap, proto } from 'baileys';
 import type { WAMessage, WAMessageUpdate, WASocket } from 'baileys';
 import PluginManager from '../plugins/pluginManager.js';
 import { detectSocialMediaLink, downloadFromSocialMedia } from './autoDownload.js';
+import { getPrefixes } from '../config/botConfig.js';
 
 type MessageType = keyof proto.IMessage;
 
@@ -54,12 +55,12 @@ export class BotHandler {
       ? (Object.getOwnPropertyNames(quotedInfo?.quotedMessage)[0] as MessageType)
       : undefined;
 
-    const prefix = '!';
+    const prefixes = getPrefixes();
     const botNumber = this.socket.user?.id?.split(':')[0] + '@s.whatsapp.net';
     const mentions = type === 'extendedTextMessage' ? quotedInfo?.mentionedJid : undefined;
 
     /* ============ Meta User ============ */
-    const user_id = isGroup ? msg?.key?.participant : msg?.key?.remoteJid;
+    const user_id = isGroup ? (msg?.key as any)?.participantAlt : (msg?.key as any)?.remoteJidAlt;
     const pushName = msg.pushName;
 
     /* ============ Meta Group ============= */
@@ -84,16 +85,28 @@ export class BotHandler {
     const isQuotedDocument = type === 'extendedTextMessage' && quotedType === 'documentMessage';
     const isQuotedMedia = isQuotedAudio || isQuotedImage || isQuotedVideo || isQuotedSticker || isQuotedDocument;
 
-    const message_prefix =
-      type === 'conversation' && msg?.message?.conversation?.startsWith(prefix)
-        ? msg?.message?.conversation
-        : type === 'imageMessage' && msg?.message?.imageMessage?.caption?.startsWith(prefix)
-          ? msg?.message?.imageMessage?.caption
-          : type === 'videoMessage' && msg?.message?.videoMessage?.caption?.startsWith(prefix)
-            ? msg?.message?.videoMessage?.caption
-            : type === 'extendedTextMessage' && msg?.message?.extendedTextMessage?.text?.startsWith(prefix)
-              ? msg?.message?.extendedTextMessage?.text
-              : null;
+    // Check if message starts with any of the configured prefixes
+    const getText = () => {
+      if (type === 'conversation') return msg?.message?.conversation;
+      if (type === 'imageMessage') return msg?.message?.imageMessage?.caption;
+      if (type === 'videoMessage') return msg?.message?.videoMessage?.caption;
+      if (type === 'extendedTextMessage') return msg?.message?.extendedTextMessage?.text;
+      return null;
+    };
+
+    const text = getText();
+    let matchedPrefix: string | null = null;
+    let message_prefix: string | null = null;
+
+    if (text) {
+      for (const prefix of prefixes) {
+        if (text.startsWith(prefix)) {
+          matchedPrefix = prefix;
+          message_prefix = text;
+          break;
+        }
+      }
+    }
     const message_button =
       type === 'buttonsResponseMessage'
         ? msg?.message?.buttonsResponseMessage?.selectedButtonId
@@ -114,13 +127,13 @@ export class BotHandler {
             : type === 'videoMessage'
               ? msg?.message?.videoMessage?.caption
               : null;
-    message = message && typeof message !== 'object' && String(message).startsWith(prefix) ? null : message;
+    message = message && typeof message !== 'object' && matchedPrefix ? null : message;
 
     const command =
       message_button !== null
         ? message_button?.toLowerCase()
-        : message_prefix !== null
-          ? String(message_prefix)?.slice(1)?.trim()?.split(/ +/)?.shift()?.toLowerCase()
+        : message_prefix !== null && matchedPrefix
+          ? String(message_prefix)?.slice(matchedPrefix.length)?.trim()?.split(/ +/)?.shift()?.toLowerCase()
           : null;
     const args =
       message && typeof message !== 'object'
@@ -130,9 +143,9 @@ export class BotHandler {
           : [];
     const isCmd =
       message && typeof message !== 'object'
-        ? message.startsWith(prefix)
+        ? prefixes.some(p => message.startsWith(p))
         : message_prefix !== null
-          ? message_prefix.startsWith(prefix)
+          ? prefixes.some(p => message_prefix.startsWith(p))
           : false;
 
     return {
@@ -173,6 +186,7 @@ export class BotHandler {
       command,
       args,
       isCmd,
+      matchedPrefix,
     };
   }
 
@@ -298,7 +312,7 @@ export class BotHandler {
 
         if (!executed) {
           await this.socket.sendMessage(from, {
-            text: `❌ Command "!${command}" not found. Use !help to see available commands.`,
+            text: `❌ Command "${simplified.matchedPrefix || '!'}${command}" not found. Use ${simplified.matchedPrefix || '!'}help to see available commands.`,
           });
         }
       }
