@@ -151,8 +151,7 @@ async function downloadTikTok(url: string, socket: WASocket, fromJid: string): P
         `_Downloaded automatically_`;
 
       if (data.type === 'video' && data.video) {
-        const videoUrl = (data.video.downloadAddr && data.video.downloadAddr.length > 0 ? data.video.downloadAddr[0] : null) ||
-          (data.video.playAddr && data.video.playAddr.length > 0 ? data.video.playAddr[0] : null);
+        const videoUrl = data.video.playAddr[0];
 
         if (!videoUrl) {
           return {

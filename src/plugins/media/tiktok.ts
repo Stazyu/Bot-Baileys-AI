@@ -43,7 +43,7 @@ const tiktokCommand: CommandModule = {
           `⏱️ Process Time: ${(processTime / 1000).toFixed(2)} seconds`;
 
         if (data.type === 'video' && data.video) {
-          const videoUrl = data.video.downloadAddr[0] || data.video.playAddr[0];
+          const videoUrl = data.video.playAddr[0];
           await context.socket.sendMessage(context.fromJid, {
             video: { url: videoUrl },
             caption: caption,
