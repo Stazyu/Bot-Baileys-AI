@@ -22,10 +22,15 @@ export interface SessionConfig {
   phoneNumber?: string;
 }
 
+export type SessionCallback = (socket: WASocket, sessionId: string) => void | Promise<void>;
+export type SessionDisconnectCallback = (sessionId: string) => void | Promise<void>;
+
 export class SessionManager {
   private sessions: Map<string, WASocket> = new Map();
   private reconnectAttempts: Map<string, number> = new Map();
   private maxReconnectAttempts = 5;
+  private sessionCallbacks: SessionCallback[] = [];
+  private disconnectCallbacks: SessionDisconnectCallback[] = [];
   private logger = pino(
     { level: 'silent' },
     pinoPretty({
@@ -78,7 +83,38 @@ export class SessionManager {
     // Save session to database
     await this.saveSessionToDB(sessionId, socket);
 
+    // Trigger callbacks for new session (only when actually creating a new socket)
+    await this.triggerCallbacks(socket, sessionId);
+
     return socket;
+  }
+
+  onSessionCreated(callback: SessionCallback): void {
+    this.sessionCallbacks.push(callback);
+  }
+
+  onSessionDisconnected(callback: SessionDisconnectCallback): void {
+    this.disconnectCallbacks.push(callback);
+  }
+
+  private async triggerCallbacks(socket: WASocket, sessionId: string): Promise<void> {
+    for (const callback of this.sessionCallbacks) {
+      try {
+        await callback(socket, sessionId);
+      } catch (error) {
+        log.error(`Error in session callback for ${sessionId}:`, error as object);
+      }
+    }
+  }
+
+  private async triggerDisconnectCallbacks(sessionId: string): Promise<void> {
+    for (const callback of this.disconnectCallbacks) {
+      try {
+        await callback(sessionId);
+      } catch (error) {
+        log.error(`Error in disconnect callback for ${sessionId}:`, error as object);
+      }
+    }
   }
 
   private registerMessageHandlers(socket: WASocket, sessionId: string, saveCreds: () => Promise<void>): void {
@@ -126,6 +162,7 @@ export class SessionManager {
             this.reconnectAttempts.delete(sessionId);
             await this.deleteSessionFromDB(sessionId);
             this.sessions.delete(sessionId);
+            await this.triggerDisconnectCallbacks(sessionId);
             return;
           }
 
@@ -136,6 +173,7 @@ export class SessionManager {
 
           setTimeout(async () => {
             this.sessions.delete(sessionId);
+            await this.triggerDisconnectCallbacks(sessionId);
             await this.createSession(sessionId);
           }, backoffDelay);
         } else {
@@ -143,6 +181,7 @@ export class SessionManager {
           this.reconnectAttempts.delete(sessionId);
           await this.deleteSessionFromDB(sessionId);
           this.sessions.delete(sessionId);
+          await this.triggerDisconnectCallbacks(sessionId);
         }
       } else if (connection === 'open') {
         // Reset reconnection attempts on successful connection
@@ -180,6 +219,7 @@ export class SessionManager {
       await socket.logout();
       this.sessions.delete(sessionId);
       await this.deleteSessionFromDB(sessionId);
+      await this.triggerDisconnectCallbacks(sessionId);
     }
   }
 
@@ -198,6 +238,7 @@ export class SessionManager {
       }).catch(() => {
         // Session might not exist, that's ok
       });
+      await this.triggerDisconnectCallbacks(sessionId);
     }
     this.sessions.clear();
   }

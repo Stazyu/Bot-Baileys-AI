@@ -1,5 +1,5 @@
 import type { CommandModule } from '../../types/index.js';
-import { createSessionWithHandler } from '../../session/sessionHelper.js';
+import { createSession } from '../../session/sessionHelper.js';
 
 const createSessionCommand: CommandModule = {
   config: {
@@ -21,7 +21,7 @@ const createSessionCommand: CommandModule = {
     }
 
     try {
-      await createSessionWithHandler(newSessionId);
+      await createSession(newSessionId);
       await context.socket.sendMessage(context.fromJid, {
         text: `✅ Session "${newSessionId}" created successfully. Check the terminal for QR code.`,
       });

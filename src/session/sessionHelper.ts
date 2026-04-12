@@ -3,15 +3,61 @@ import BotHandler from '../bot/botHandler.js';
 import { log } from '../utils/logger.js';
 import type { WASocket } from 'baileys';
 
+// Map to track bot handlers per session
+const botHandlers = new Map<string, BotHandler>();
+
 /**
- * Create a new session and attach bot handler
+ * Attach bot handler to a session
+ */
+async function attachBotHandler(socket: WASocket, sessionId: string): Promise<void> {
+  // Remove existing handler if any
+  const existingHandler = botHandlers.get(sessionId);
+  if (existingHandler) {
+    await existingHandler.unloadPlugins();
+    botHandlers.delete(sessionId);
+  }
+
+  // Create and attach new handler
+  const botHandler = new BotHandler(socket, sessionId);
+  await botHandler.loadPlugins();
+  botHandlers.set(sessionId, botHandler);
+
+  log.info(`✅ BotHandler attached to session: ${sessionId}`);
+}
+
+/**
+ * Cleanup bot handler for a session
+ */
+async function cleanupBotHandler(sessionId: string): Promise<void> {
+  const handler = botHandlers.get(sessionId);
+  if (handler) {
+    await handler.unloadPlugins();
+    botHandlers.delete(sessionId);
+    log.info(`🧹 BotHandler cleaned up for session: ${sessionId}`);
+  }
+}
+
+// Register callback to attach bot handler whenever a session is created or reconnected
+sessionManager.onSessionCreated(async (socket, sessionId) => {
+  log.info(`🔗 Session created/reconnected: ${sessionId}, attaching BotHandler...`);
+  await attachBotHandler(socket, sessionId);
+});
+
+// Register callback to cleanup bot handler whenever a session is disconnected
+sessionManager.onSessionDisconnected(async (sessionId) => {
+  log.info(`🔌 Session disconnected: ${sessionId}, cleaning up BotHandler...`);
+  await cleanupBotHandler(sessionId);
+});
+
+/**
+ * Create a new session (bot handler is attached automatically via callbacks)
  * This function can be called from anywhere (bot commands, API endpoints, etc.)
- * 
+ *
  * @param sessionId - Unique identifier for the session
  * @param forceClear - If true, clears existing auth data before creating session
  * @returns The created socket and session ID
  */
-export async function createSessionWithHandler(
+export async function createSession(
   sessionId: string,
   forceClear = false
 ): Promise<{ socket: WASocket; sessionId: string }> {
@@ -24,14 +70,10 @@ export async function createSessionWithHandler(
     return { socket: existingSocket, sessionId };
   }
 
-  // Create new session
+  // Create new session (callback will automatically attach bot handler)
   const socket = await sessionManager.createSession(sessionId, forceClear);
 
-  // Attach bot handler
-  const botHandler = new BotHandler(socket, sessionId);
-  await botHandler.loadPlugins();
-
-  log.info(`✅ Session ${sessionId} created with handler`);
+  log.info(`✅ Session ${sessionId} created`);
   return { socket, sessionId };
 }
 
@@ -76,11 +118,6 @@ export async function disconnectAllSessions(): Promise<void> {
 export async function loadActiveSessions(): Promise<void> {
   await sessionManager.loadActiveSessions();
 
-  // Attach bot handlers to all loaded sessions
-  const sessions = await sessionManager.getAllSessions();
-  for (const [sessionId, socket] of sessions.entries()) {
-    log.info(`📱 Attaching handler to session: ${sessionId}`);
-    const botHandler = new BotHandler(socket, sessionId);
-    await botHandler.loadPlugins();
-  }
+  // Note: Bot handlers are automatically attached via the callback registered above
+  // No need to manually attach them here
 }

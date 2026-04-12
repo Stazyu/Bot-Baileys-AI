@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-import { createSessionWithHandler, loadActiveSessions, disconnectAllSessions, getAllSessions } from './session/sessionHelper.js';
+import { createSession, loadActiveSessions, disconnectAllSessions, getAllSessions } from './session/sessionHelper.js';
 import prisma from './database/prisma.js';
 
 // Set console encoding to UTF-8 for emoji support on Windows
@@ -29,13 +29,13 @@ async function main() {
   const forceClear = args.includes('--force-clear');
 
   if (newSessionId) {
-    await createSessionWithHandler(newSessionId, forceClear);
+    await createSession(newSessionId, forceClear);
   } else {
     // Check if there are any active sessions
     const sessions = await getAllSessions();
     if (sessions.size === 0) {
       console.log('ℹ️  No active sessions found. Creating default session...');
-      await createSessionWithHandler('default');
+      await createSession('default');
     } else {
       console.log('ℹ️  No new session specified. Using existing sessions...');
     }
