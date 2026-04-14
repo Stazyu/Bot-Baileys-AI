@@ -13,7 +13,11 @@ RUN apt-get update && apt-get install -y \
     librsvg2-dev \
     libvips-dev \
     ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+    wget \
+    && rm -rf /var/lib/apt/lists/* \
+    && wget http://security.debian.org/debian-security/pool/updates/main/o/openssl/libssl1.1_1.1.1w-0+deb11u1_amd64.deb \
+    && dpkg -i libssl1.1_1.1.1w-0+deb11u1_amd64.deb \
+    && rm libssl1.1_1.1.1w-0+deb11u1_amd64.deb
 
 # Enable pnpm
 RUN corepack enable && corepack prepare pnpm@latest --activate
