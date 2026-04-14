@@ -33,11 +33,11 @@ export function detectSocialMediaLink(text: string): SocialMediaLink | null {
   if (!text) return null;
 
   const patterns = {
-    instagram: /(?:https?:\/\/)?(?:www\.)?(?:instagram\.com|instagr\.am)\/(?:p|reel|tv)\/[\w-]+/i,
+    instagram: /(?:https?:\/\/)?(?:www\.)?(?:instagram\.com|instagr\.am)\/(?:p|reel|tv)\/[\w-]+(?:\/[\w.-]+)*/i,
     tiktok: /(?:https?:\/\/)?(?:www\.)?(?:tiktok\.com|vm\.tiktok\.com)\/@[\w.-]+\/[\w-]+(?:\/[\w-]+)*/i,
-    youtube: /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)[\w-]+/i,
-    facebook: /(?:https?:\/\/)?(?:www\.)?(?:facebook\.com|fb\.watch)\/[\w.-]+/i,
-    twitter: /(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\/[\w.-]+\/status\/[\w-]+/i,
+    youtube: /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)[\w-]+(?:[?&][\w.-]+)*/i,
+    facebook: /(?:https?:\/\/)?(?:www\.)?(?:facebook\.com|fb\.watch)\/[\w.-]+(?:\/[\w.-]+)*/i,
+    twitter: /(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\/[\w.-]+\/status\/[\w-]+(?:\/[\w.-]+)*/i,
   };
 
   for (const [platform, pattern] of Object.entries(patterns)) {
