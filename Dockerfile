@@ -30,7 +30,7 @@ FROM base AS deps
 COPY package.json pnpm-lock.yaml ./
 
 # Install deps (pakai cache biar cepat)
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --ignore-scripts=false
 
 # ===== BUILD =====
 FROM base AS build
@@ -40,6 +40,10 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
+# Set dummy DATABASE_URL for Prisma client generation (types only, no connection needed)
+ENV DATABASE_URL="postgresql://user:password@localhost:5432/db?schema=public"
+
+RUN pnpm prisma:generate
 RUN pnpm build
 
 # ===== RUN =====
