@@ -9,17 +9,17 @@ const pingCommand: CommandModule = {
     category: 'basic',
   },
   handler: async function (context, args: string[]): Promise<void> {
-    const startTime = Date.now();
+    const startTime = context.simplified?.timeStampHandler!;
 
-    await context.socket.sendMessage(context.fromJid, {
-      text: 'Pong! 🏓',
-    });
+    // await context.socket.sendMessage(context.fromJid, {
+    //   text: 'Pong! 🏓',
+    // });
 
     const endTime = Date.now();
     const responseTime = endTime - startTime;
 
     await context.socket.sendMessage(context.fromJid, {
-      text: `⏱️ Response time: ${responseTime}ms`,
+      text: `Pong! 🏓\n\n⏱️ Response time: ${responseTime}ms`,
     });
   },
 };

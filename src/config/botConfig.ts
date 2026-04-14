@@ -9,24 +9,36 @@ const __dirname = dirname(__filename);
 export interface BotConfig {
   ownerNumbers: string[];
   prefixes: string[];
+  maintenance: boolean;
+  maintenanceMessage?: string;
 }
 
 let config: BotConfig | null = null;
 
 export function loadConfig(): BotConfig {
-  if (config) {
+  if (config !== null) {
     return config;
   }
 
+  // Default config
+  const defaultConfig: BotConfig = {
+    ownerNumbers: [],
+    prefixes: ['!'],
+    maintenance: false,
+    maintenanceMessage: '🔧 Bot sedang dalam maintenance. Silakan coba lagi nanti.',
+  };
+
   // Try to load from config.json
   const configPath = join(__dirname, '../../config.json');
-  
+
   if (existsSync(configPath)) {
     try {
       const configData = JSON.parse(readFileSync(configPath, 'utf-8'));
       config = {
-        ownerNumbers: configData.ownerNumbers || [],
-        prefixes: configData.prefixes || ['!'],
+        ownerNumbers: configData.ownerNumbers || defaultConfig.ownerNumbers,
+        prefixes: configData.prefixes || defaultConfig.prefixes,
+        maintenance: configData.maintenance ?? defaultConfig.maintenance,
+        maintenanceMessage: configData.maintenanceMessage || defaultConfig.maintenanceMessage,
       };
       return config;
     } catch (error) {
@@ -41,6 +53,8 @@ export function loadConfig(): BotConfig {
   config = {
     ownerNumbers: ownerNumbersEnv.split(',').map(n => n.trim()).filter(n => n.length > 0),
     prefixes: prefixesEnv.split(',').map(p => p.trim()).filter(p => p.length > 0),
+    maintenance: process.env.MAINTENANCE === 'true',
+    maintenanceMessage: process.env.MAINTENANCE_MESSAGE || defaultConfig.maintenanceMessage,
   };
 
   return config;
@@ -59,9 +73,19 @@ export function isOwner(jid: string): boolean {
   return ownerNumbers.some(owner => jid.includes(owner) || owner.includes(jid));
 }
 
+export function isMaintenance(): boolean {
+  return loadConfig().maintenance;
+}
+
+export function getMaintenanceMessage(): string {
+  return loadConfig().maintenanceMessage || '🔧 Bot sedang dalam maintenance. Silakan coba lagi nanti.';
+}
+
 export default {
   loadConfig,
   getOwnerNumbers,
   getPrefixes,
   isOwner,
+  isMaintenance,
+  getMaintenanceMessage,
 };

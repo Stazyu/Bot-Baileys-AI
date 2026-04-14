@@ -2,7 +2,7 @@ import { makeWASocket, BaileysEventMap, proto } from 'baileys';
 import type { WAMessage, WAMessageUpdate, WASocket } from 'baileys';
 import PluginManager from '../plugins/pluginManager.js';
 import { detectSocialMediaLink, downloadFromSocialMedia } from './autoDownload.js';
-import { getPrefixes } from '../config/botConfig.js';
+import { getPrefixes, isMaintenance, getMaintenanceMessage, isOwner } from '../config/botConfig.js';
 
 type MessageType = keyof proto.IMessage;
 
@@ -47,6 +47,7 @@ export class BotHandler {
       msg.message?.videoMessage?.caption ||
       msg.message?.extendedTextMessage?.text;
     const messageTimeStamp = msg.messageTimestamp;
+    const timeStampHandler = Date.now();
     const quotedInfo =
       type === 'extendedTextMessage' && msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
         ? msg.message?.extendedTextMessage?.contextInfo
@@ -159,6 +160,7 @@ export class BotHandler {
       type,
       body,
       messageTimeStamp,
+      timeStampHandler,
       quotedInfo,
       quotedType,
       botNumber,
@@ -285,7 +287,16 @@ export class BotHandler {
 
   private async processMessage(message: WAMessage, simplified: ReturnType<typeof this.simplified>): Promise<void> {
     try {
-      const { command, args, from, isCmd, body } = simplified;
+      const { command, args, from, isCmd, body, fromMe, user_id } = simplified;
+      console.log('user_id:', user_id);
+
+      // Check maintenance mode (only for commands, owners can bypass)
+      if (isMaintenance() && isCmd && !isOwner(user_id || '')) {
+        if (from) {
+          await this.socket.sendMessage(from, { text: getMaintenanceMessage() });
+        }
+        return;
+      }
 
       // Auto-detect social media links
       if (body && !isCmd && from) {
@@ -344,4 +355,5 @@ export class BotHandler {
 }
 
 export default BotHandler;
+
 
