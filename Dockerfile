@@ -13,7 +13,7 @@ RUN corepack enable && corepack prepare yarn@4.9.2 --activate
 WORKDIR /app
 
 # Copy package files
-COPY package.json yarn.lock ./
+COPY package.json ./
 
 # Install dependencies
 RUN yarn install --frozen-lockfile
