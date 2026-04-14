@@ -5,7 +5,7 @@ const helpCommand: CommandModule = {
   config: {
     name: 'help',
     aliases: ['h', 'menu'],
-    description: 'Show available commands',
+    description: 'Tampilkan perintah yang tersedia',
     usage: '!help',
     category: 'basic',
   },
@@ -14,7 +14,7 @@ const helpCommand: CommandModule = {
     const pm = context.pluginManager;
     if (!pm) {
       await context.socket.sendMessage(context.fromJid, {
-        text: '❌ Plugin manager not available',
+        text: '❌ Plugin manager tidak tersedia',
       });
       return;
     }
@@ -37,17 +37,17 @@ const helpCommand: CommandModule = {
 
         const helpText = `📖 *${command.config.name}*
 
-*Description:* ${command.config.description}
-*Usage:* ${command.config.usage.replace('!', matchedPrefix)}${aliasesText}
-*Category:* ${command.config.category || 'general'}
-*Admin Only:* ${command.config.adminOnly ? 'Yes' : 'No'}`;
+*Deskripsi:* ${command.config.description}
+*Penggunaan:* ${command.config.usage.replace('!', matchedPrefix)}${aliasesText}
+*Kategori:* ${command.config.category || 'general'}
+*Hanya Admin:* ${command.config.adminOnly ? 'Ya' : 'Tidak'}`;
 
         await context.socket.sendMessage(context.fromJid, {
           text: helpText,
         });
       } else {
         await context.socket.sendMessage(context.fromJid, {
-          text: `❌ Command "${matchedPrefix}${commandName}" not found.`,
+          text: `❌ Perintah "${matchedPrefix}${commandName}" tidak ditemukan.`,
         });
       }
     } else {
@@ -62,7 +62,14 @@ const helpCommand: CommandModule = {
         categories.get(category)!.push(cmd);
       }
 
-      let helpText = `🤖 *Bot Commands*\n\n`;
+      let helpText = `🤖 *Perintah Bot*\n\n`;
+
+      // Add automatic features section
+      helpText += `⚡ *Fitur Otomatis:*\n`;
+      helpText += `• Instagram - Auto download foto/video\n`;
+      helpText += `• TikTok - Auto download video/foto\n`;
+      helpText += `• Facebook - Auto download video\n`;
+      helpText += `• Twitter/X - Auto download video\n\n`;
 
       for (const [category, commands] of categories.entries()) {
         helpText += `*${category.charAt(0).toUpperCase() + category.slice(1)}:*\n`;
@@ -73,7 +80,7 @@ const helpCommand: CommandModule = {
         helpText += '\n';
       }
 
-      helpText += `Use ${matchedPrefix}help <command> for more information about a specific command.\n\nSession: ${context.sessionId}`;
+      helpText += `Gunakan ${matchedPrefix}help <perintah> untuk informasi lebih lanjut tentang perintah tertentu.\n\nSesi: ${context.sessionId}`;
 
       await context.socket.sendMessage(context.fromJid, {
         text: helpText,
