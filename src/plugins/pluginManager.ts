@@ -2,7 +2,7 @@ import { readdir, stat } from 'fs/promises';
 import { join, extname } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import type { WASocket } from 'baileys';
+import type { WASocket } from '@innovatorssoft/baileys';
 import { log } from '../utils/logger.js';
 import type { PluginModule, CommandContext, CommandConfig, CategoryPlugin, CommandModule } from '../types/index.js';
 import { isOwner } from '../config/botConfig.js';

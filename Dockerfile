@@ -1,8 +1,8 @@
-FROM node:20-bookworm-slim
+# ===== BASE =====
+FROM node:20-bookworm-slim AS base
 
-# Install system dependencies
+# Install system deps (WAJIB untuk native modules)
 RUN apt-get update && apt-get install -y \
-    libjemalloc2 \
     git \
     python3 \
     build-essential \
@@ -15,37 +15,41 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Enable pnpm + yarn (INI KUNCI FIX)
-RUN corepack enable && \
-    corepack prepare pnpm@latest --activate && \
-    corepack prepare yarn@4.9.2 --activate
+# Enable pnpm
+RUN corepack enable && corepack prepare pnpm@latest --activate
 
-# Setup pnpm environment (fix ENOENT error)
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 
-# Fix permission store (penting banget)
-RUN mkdir -p /pnpm/store && chmod -R 777 /pnpm
+WORKDIR /app
+
+# ===== DEPENDENCIES =====
+FROM base AS deps
+
+# Copy lockfile dulu (penting untuk consistency)
+COPY package.json pnpm-lock.yaml ./
+
+# Install deps (pakai cache biar cepat)
+RUN pnpm install --frozen-lockfile
+
+# ===== BUILD =====
+FROM base AS build
 
 WORKDIR /app
 
-# Copy dependency files dulu
-COPY package.json ./
-COPY pnpm-lock.yaml ./
-
-# Install dependencies
-RUN pnpm install
-
-# Copy source
+COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Build
 RUN pnpm build
 
-# Create sessions dir
-RUN mkdir -p sessions
+# ===== RUN =====
+FROM node:20-bookworm-slim
 
-# Optional performance
-ENV LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
+WORKDIR /app
 
-CMD ["pnpm", "start"]
+# Copy hasil build + deps saja (image jadi kecil & clean)
+COPY --from=build /app ./
+
+ENV NODE_ENV=production
+
+CMD ["node", "dist/index.js"]

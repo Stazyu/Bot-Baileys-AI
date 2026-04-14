@@ -1,10 +1,9 @@
-import { makeWASocket, BaileysEventMap, proto } from 'baileys';
-import type { WAMessage, WAMessageUpdate, WASocket } from 'baileys';
+import type { WAMessage, WAMessageUpdate, WASocket } from '@innovatorssoft/baileys';
 import PluginManager from '../plugins/pluginManager.js';
 import { detectSocialMediaLink, downloadFromSocialMedia } from './autoDownload.js';
 import { getPrefixes, isMaintenance, getMaintenanceMessage, isOwner } from '../config/botConfig.js';
 
-type MessageType = keyof proto.IMessage;
+type MessageType = keyof WAMessage['message'];
 
 export type SimplifiedMessage = ReturnType<BotHandler['simplified']>;
 
@@ -30,7 +29,7 @@ export class BotHandler {
     await this.pluginManager.unloadPlugins();
   }
 
-  private simplified(msg: proto.IWebMessageInfo) {
+  private simplified(msg: WAMessage) {
     // console.log('msg :', msg);
     const chatMessage = msg.message;
     const id = msg.key?.id;
@@ -61,9 +60,10 @@ export class BotHandler {
     const mentions = type === 'extendedTextMessage' ? quotedInfo?.mentionedJid : undefined;
 
     /* ============ Meta User ============ */
-    const user_id = isGroup
+    const rawUserId = isGroup
       ? (msg?.key as any)?.participantAlt as string
       : (msg?.key as any)?.remoteJidAlt as string;
+    const user_id = rawUserId?.replace(/:\d+@s\.whatsapp\.net$/, '@s.whatsapp.net');
     const pushName = msg.pushName;
 
     /* ============ Meta Group ============= */

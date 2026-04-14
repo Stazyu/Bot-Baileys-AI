@@ -1,5 +1,5 @@
 import type { CommandModule } from '../../types/index.js';
-import { downloadContentFromMessage } from 'baileys';
+import { downloadContentFromMessage } from '@innovatorssoft/baileys';
 import { Sticker } from 'wa-sticker-formatter';
 
 const stickerCommand: CommandModule = {

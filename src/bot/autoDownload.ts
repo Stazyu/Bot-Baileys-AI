@@ -1,5 +1,5 @@
 import nexo from 'nexo-aio-downloader';
-import type { WASocket } from 'baileys';
+import type { WASocket } from '@innovatorssoft/baileys';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);

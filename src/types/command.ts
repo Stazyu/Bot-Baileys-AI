@@ -1,4 +1,4 @@
-import type { WAMessage, WASocket } from 'baileys';
+import type { WAMessage, WASocket } from '@innovatorssoft/baileys';
 import type { SimplifiedMessage } from '../bot/botHandler.js';
 
 export interface CommandContext {

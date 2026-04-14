@@ -1,4 +1,5 @@
 import nexo from 'nexo-aio-downloader';
+import { generateInteractiveButtonMessage } from '@innovatorssoft/baileys';
 
 import type { CommandModule } from '../../types/index.js';
 

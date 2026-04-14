@@ -4,8 +4,8 @@ import {
   BaileysEventMap,
   ConnectionState,
   Browsers,
-} from 'baileys';
-import type { WASocket } from 'baileys';
+} from '@innovatorssoft/baileys';
+import type { WASocket } from '@innovatorssoft/baileys';
 import pino from 'pino';
 import pinoPretty from 'pino-pretty';
 import { Boom } from '@hapi/boom';
@@ -13,7 +13,7 @@ import { Prisma } from '@prisma/client';
 import prisma from '../database/prisma.js';
 import { useMultiFileAuthStateDB } from './authStateDB.js';
 import { log } from '../utils/logger.js';
-import { useMultiFileAuthState } from 'baileys';
+import { useMultiFileAuthState } from '@innovatorssoft/baileys';
 import path from 'path';
 import QRCode from 'qrcode';
 
