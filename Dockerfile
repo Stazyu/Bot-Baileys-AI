@@ -27,6 +27,7 @@ WORKDIR /app
 # Copy lockfile dulu (PENTING untuk cache & konsistensi)
 COPY pnpm-lock.yaml ./
 COPY package.json ./
+COPY pnpm-workspace.yaml ./
 
 # Install dependencies
 RUN pnpm install
