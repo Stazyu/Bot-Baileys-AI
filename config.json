@@ -1,6 +1,6 @@
 {
   "ownerNumbers": ["6281578794887@s.whatsapp.net"],
   "prefixes": ["!", ".", "#", "/"],
-  "maintenance": true,
+  "maintenance": false,
   "maintenanceMessage": "🔧 Bot sedang dalam maintenance. Silakan coba lagi nanti."
 }

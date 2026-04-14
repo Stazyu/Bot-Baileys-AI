@@ -1,52 +1,54 @@
-# ===== BASE =====
-FROM node:20-bookworm AS base
+# ===== BASE BUILD (heavy, temporary) =====
+FROM node:20-bookworm AS builder
 
 RUN apt-get update && apt-get install -y \
-    git \
     python3 \
     build-essential \
-    libcairo2-dev \
-    libpango1.0-dev \
-    libjpeg-dev \
-    libgif-dev \
-    librsvg2-dev \
     libvips-dev \
-    ffmpeg \
     openssl \
     && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
-ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
-
 WORKDIR /app
 
-# ===== DEPENDENCIES =====
-FROM base AS deps
-
+# Copy only deps first (cache friendly)
 COPY package.json pnpm-lock.yaml ./
+
+# builder stage
 RUN pnpm install --frozen-lockfile
 
-# ===== BUILD =====
-FROM base AS build
+# 🔥 WAJIB: rebuild sharp di environment Linux
+RUN pnpm rebuild sharp
 
-COPY --from=deps /app/node_modules ./node_modules
+# Copy source
 COPY . .
 
 ENV DATABASE_URL="postgresql://user:password@localhost:5432/db?schema=public"
 
-# 🔥 penting: generate sesuai openssl 3
+# Prisma generate (build-time only)
 RUN npx prisma generate
 
+# Build app
 RUN pnpm build
 
-# ===== RUN =====
-FROM base AS runner
+# 🔥 buang dev deps
+RUN pnpm prune --prod
+
+
+# ===== RUNTIME (super clean & kecil) =====
+FROM node:20-bookworm-slim
 
 WORKDIR /app
 
-COPY --from=build /app ./
+# install only runtime deps (tanpa build tools)
+RUN apt-get update && apt-get install -y \
+    libvips \
+    openssl \
+    && rm -rf /var/lib/apt/lists/*
+
+# copy hasil final saja
+COPY --from=builder /app ./
 
 ENV NODE_ENV=production
 
