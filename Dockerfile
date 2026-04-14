@@ -4,6 +4,7 @@ FROM node:18-bullseye-slim
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     libjemalloc2 \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Install yarn version 4.9.2
