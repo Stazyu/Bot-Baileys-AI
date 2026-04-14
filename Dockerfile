@@ -1,38 +1,46 @@
-# Use Node.js 18 LTS with Ubuntu base for easier system dependency installation
-FROM node:18-bullseye-slim
+FROM node:20-bookworm-slim
 
-# Install system dependencies
+# Install system dependencies (WAJIB)
 RUN apt-get update && apt-get install -y \
     libjemalloc2 \
     git \
+    python3 \
+    build-essential \
+    libcairo2-dev \
+    libpango1.0-dev \
+    libjpeg-dev \
+    libgif-dev \
+    librsvg2-dev \
+    libvips-dev \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Install yarn version 4.9.2
-RUN corepack enable && corepack prepare yarn@4.9.2 --activate
+# Enable pnpm via corepack
+RUN corepack enable && corepack prepare pnpm@latest --activate
 
-# Set working directory
+# Set pnpm path (best practice)
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+
 WORKDIR /app
 
-# Copy package files
+# Copy lockfile dulu (PENTING untuk cache & konsistensi)
+COPY pnpm-lock.yaml ./
 COPY package.json ./
 
 # Install dependencies
-RUN yarn install
+RUN pnpm install --frozen-lockfile
 
-# Copy source code
+# Copy source
 COPY . .
 
-# Build TypeScript
-RUN yarn build
+# Build
+RUN pnpm build
 
-# Create sessions directory
+# Folder session
 RUN mkdir -p sessions
 
-# Set environment variable for jemalloc
+# Jemalloc (optional)
 ENV LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
 
-# Expose port if needed (adjust based on your needs)
-# EXPOSE 3000
-
-# Run the application
-CMD ["yarn", "start"]
+CMD ["pnpm", "start"]
