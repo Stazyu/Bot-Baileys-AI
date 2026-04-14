@@ -26,6 +26,9 @@ importers:
       link-preview-js:
         specifier: ^3.0.0
         version: 3.0.0
+      moment:
+        specifier: ^2.30.1
+        version: 2.30.1
       nexo-aio-downloader:
         specifier: github:Stazyu/nexo-aio-downloader
         version: https://codeload.github.com/Stazyu/nexo-aio-downloader/tar.gz/f91fe832228a8a63dca017805f7ffabad2ad80ff
@@ -1957,6 +1960,9 @@ packages:
     resolution: {integrity: sha512-vVqVZQyf3WLx2Shd0qJ9xuvqgAyKPLAiqITEtqW0oIUjzo3PePDd6fW9iFz30ef7Ysp/oiWqbhszeGWW2T6Gzw==}
     engines: {node: '>=10'}
     hasBin: true
+
+  moment@2.30.1:
+    resolution: {integrity: sha512-uEmtNhbDOrWPFS+hdjFCBfy9f2YoyzRpwcl+DqpC6taX21FzsTLQVbMV/W7PzNSX6x/bhC1zA3c2UQ5NzH6how==}
 
   mpg123-decoder@1.0.3:
     resolution: {integrity: sha512-+fjxnWigodWJm3+4pndi+KUg9TBojgn31DPk85zEsim7C6s0X5Ztc/hQYdytXkwuGXH+aB0/aEkG40Emukv6oQ==}
@@ -5103,6 +5109,8 @@ snapshots:
   mkdirp-classic@0.5.3: {}
 
   mkdirp@1.0.4: {}
+
+  moment@2.30.1: {}
 
   mpg123-decoder@1.0.3:
     dependencies:

@@ -2,6 +2,25 @@ import type { WAMessage, WAMessageUpdate, WASocket } from '@innovatorssoft/baile
 import PluginManager from '../plugins/pluginManager.js';
 import { detectSocialMediaLink, downloadFromSocialMedia } from './autoDownload.js';
 import { getPrefixes, isMaintenance, getMaintenanceMessage, isOwner } from '../config/botConfig.js';
+import moment from 'moment';
+
+moment.locale('jv');
+
+// Color utility for console output
+const color = (text: string, colorName: string): string => {
+  const colors: Record<string, string> = {
+    reset: '\x1b[0m',
+    black: '\x1b[30m',
+    red: '\x1b[31m',
+    green: '\x1b[32m',
+    yellow: '\x1b[33m',
+    blue: '\x1b[34m',
+    magenta: '\x1b[35m',
+    cyan: '\x1b[36m',
+    white: '\x1b[37m',
+  };
+  return `${colors[colorName] || colors.white}${text}${colors.reset}`;
+};
 
 type MessageType = keyof WAMessage['message'];
 
@@ -58,6 +77,8 @@ export class BotHandler {
     const prefixes = getPrefixes();
     const botNumber = this.socket.user?.id?.split(':')[0] + '@s.whatsapp.net';
     const mentions = type === 'extendedTextMessage' ? quotedInfo?.mentionedJid : undefined;
+    const time = moment().format('HH:mm:ss');
+    const date = moment().format('Do MMMM YYYY, h:mm:ss a');
 
     /* ============ Meta User ============ */
     const rawUserId = isGroup
@@ -191,6 +212,9 @@ export class BotHandler {
       args,
       isCmd,
       matchedPrefix,
+      time,
+      date,
+      prefix: matchedPrefix || '',
     };
   }
 
@@ -239,6 +263,35 @@ export class BotHandler {
     console.log(`✅ [BotHandler] All event handlers registered for session: ${this.sessionId}`);
   }
 
+  private printLog(msg: ReturnType<typeof this.simplified>): void {
+    const { time, date, isCmd, message, command, groupName, isGroup, isMedia, isTemplateButtonReplyMessage, isButtonResponseMessage, message_button, prefix, isAudio, isSticker, user_id } = msg;
+
+    if (!isCmd && isGroup && !isMedia && !isSticker && !command && !message_button) {
+      console.log(color(`[GROUP || MSG]`, 'blue'), color('=>', 'white'), color(`TIME: ${time}`, 'yellow'), color(`DATE: ${date}`, 'yellow'), color(message!, 'blue'), color('FROM', 'white'), color(String(user_id).split('@')[0], 'yellow'), color('IN', 'white'), color(groupName!, 'yellow'));
+    }
+    if (!isCmd && !isGroup && !isMedia && !isSticker && !command && !message_button) {
+      console.log(color(`[PRIVATE || MSG]`, 'blue'), color('=>', 'white'), color(`TIME: ${time}`, 'yellow'), color(`DATE: ${date}`, 'yellow'), color(message!, 'blue'), color('FROM', 'white'), color(String(user_id).split('@')[0], 'yellow'));
+    }
+    if (isCmd && isGroup && !isMedia && !isSticker) {
+      console.log(color(`[GROUP || CMD]`, 'cyan'), color('=>', 'white'), color(`TIME: ${time}`, 'yellow'), color(`DATE: ${date}`, 'yellow'), color(prefix + command, 'green'), color('FROM', 'white'), color(String(user_id).split('@')[0], 'yellow'), color('IN', 'white'), color(groupName!, 'yellow'));
+    }
+    if (isCmd && !isGroup && !isMedia && !isSticker) {
+      console.log(color(`[PRIVATE || CMD]`, 'cyan'), color('=>', 'white'), color(`TIME: ${time}`, 'yellow'), color(`DATE: ${date}`, 'yellow'), color(prefix + command, 'green'), color('FROM', 'white'), color(String(user_id).split('@')[0], 'yellow'));
+    }
+    if (isTemplateButtonReplyMessage && isGroup && !isMedia && !isSticker) {
+      console.log(color(`[GROUP || BUTTON]`, 'magenta'), color('=>', 'white'), color(`TIME: ${time}`, 'yellow'), color(`DATE: ${date}`, 'yellow'), color(message_button!, 'magenta'), color('FROM', 'white'), color(String(user_id).split('@')[0], 'yellow'), color('IN', 'white'), color(groupName!, 'yellow'));
+    }
+    if (isTemplateButtonReplyMessage && !isGroup && !isMedia && !isSticker) {
+      console.log(color(`[PRIVATE || BUTTON]`, 'magenta'), color('=>', 'white'), color(`TIME: ${time}`, 'yellow'), color(`DATE: ${date}`, 'yellow'), color(message_button!, 'magenta'), color('FROM', 'white'), color(String(user_id).split('@')[0], 'yellow'));
+    }
+    if (isButtonResponseMessage && isGroup && !isMedia && !isSticker) {
+      console.log(color(`[GROUP || BUTTON]`, 'magenta'), color('=>', 'white'), color(`TIME: ${time}`, 'yellow'), color(`DATE: ${date}`, 'yellow'), color(message_button!, 'magenta'), color('FROM', 'white'), color(String(user_id).split('@')[0], 'yellow'), color('IN', 'white'), color(groupName!, 'yellow'));
+    }
+    if (isButtonResponseMessage && !isGroup && !isMedia && !isSticker) {
+      console.log(color(`[PRIVATE || BUTTON]`, 'magenta'), color('=>', 'white'), color(`TIME: ${time}`, 'yellow'), color(`DATE: ${date}`, 'yellow'), color(message_button!, 'magenta'), color('FROM', 'white'), color(String(user_id).split('@')[0], 'yellow'));
+    }
+  }
+
   private async handleMessage(message: WAMessage): Promise<void> {
     try {
       if (!message.message) {
@@ -246,7 +299,8 @@ export class BotHandler {
       }
 
       const simplified = this.simplified(message);
-      console.log(`[${this.sessionId}] 💾 Message details -`, simplified);
+      this.printLog(simplified);
+      // console.log(`[${this.sessionId}] 💾 Message details -`, simplified);
 
       // Save message to database
       // await prisma.message.create({
@@ -288,7 +342,6 @@ export class BotHandler {
   private async processMessage(message: WAMessage, simplified: ReturnType<typeof this.simplified>): Promise<void> {
     try {
       const { command, args, from, isCmd, body, fromMe, user_id } = simplified;
-      console.log('user_id:', user_id);
 
       // Check maintenance mode (only for commands, owners can bypass)
       if (isMaintenance() && isCmd && !isOwner(user_id || '')) {
