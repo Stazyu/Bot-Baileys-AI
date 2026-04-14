@@ -20,6 +20,13 @@ export interface DownloadResult {
 }
 
 /**
+ * Send error message to user
+ */
+async function sendErrorMessage(socket: WASocket, fromJid: string, message: string): Promise<void> {
+  await socket.sendMessage(fromJid, { text: message });
+}
+
+/**
  * Detect social media links from text
  */
 export function detectSocialMediaLink(text: string): SocialMediaLink | null {
@@ -78,6 +85,7 @@ export async function downloadFromSocialMedia(
     }
   } catch (error) {
     console.error('Error downloading from social media:', error);
+    await sendErrorMessage(socket, fromJid, '❌ Gagal mendownload media. Terjadi kesalahan sistem.');
     return {
       success: false,
       error: 'Gagal mendownload media',
@@ -112,12 +120,14 @@ async function downloadInstagram(url: string, socket: WASocket, fromJid: string)
       };
     }
 
+    await sendErrorMessage(socket, fromJid, '❌ Gagal mengambil media dari Instagram. Link tidak valid atau media tidak ditemukan.');
     return {
       success: false,
       error: 'Gagal mengambil media dari Instagram',
     };
   } catch (error) {
     console.error('Instagram download error:', error);
+    await sendErrorMessage(socket, fromJid, '❌ Gagal mendownload dari Instagram. Link mungkin privat atau tidak valid.');
     return {
       success: false,
       error: 'Gagal mendownload dari Instagram',
@@ -135,6 +145,7 @@ async function downloadTikTok(url: string, socket: WASocket, fromJid: string): P
     console.log('TikTok download result:', result);
 
     if (result.status !== 'success') {
+      await sendErrorMessage(socket, fromJid, '❌ Gagal mengambil media dari TikTok. Link tidak valid atau media tidak ditemukan.');
       return {
         success: false,
         error: 'Gagal mengambil media dari TikTok',
@@ -154,6 +165,7 @@ async function downloadTikTok(url: string, socket: WASocket, fromJid: string): P
         const videoUrl = data.video.playAddr[0];
 
         if (!videoUrl) {
+          await sendErrorMessage(socket, fromJid, '❌ Gagal mengambil media dari TikTok: URL video tidak ditemukan.');
           return {
             success: false,
             error: 'Gagal mengambil media dari TikTok: URL tidak ditemukan',
@@ -185,12 +197,14 @@ async function downloadTikTok(url: string, socket: WASocket, fromJid: string): P
       }
     }
 
+    await sendErrorMessage(socket, fromJid, '❌ Gagal mengambil media dari TikTok. Media tidak ditemukan.');
     return {
       success: false,
       error: 'Gagal mengambil media dari TikTok',
     };
   } catch (error) {
     console.error('TikTok download error:', error);
+    await sendErrorMessage(socket, fromJid, '❌ Gagal mendownload dari TikTok. Link mungkin privat atau tidak valid.');
     return {
       success: false,
       error: 'Gagal mendownload dari TikTok',
@@ -213,12 +227,15 @@ async function downloadYouTube(url: string, socket: WASocket, fromJid: string): 
       };
     }
 
+    await sendErrorMessage(socket, fromJid, '❌ Gagal mengambil media dari YouTube. Link tidak valid.');
+
     return {
       success: false,
       error: 'Gagal mengambil media dari YouTube',
     };
   } catch (error) {
     console.error('YouTube download error:', error);
+    await sendErrorMessage(socket, fromJid, '❌ Gagal mendownload dari YouTube. Link mungkin tidak valid.');
     return {
       success: false,
       error: 'Gagal mendownload dari YouTube',
@@ -245,12 +262,14 @@ async function downloadFacebook(url: string, socket: WASocket, fromJid: string):
       };
     }
 
+    await sendErrorMessage(socket, fromJid, '❌ Gagal mengambil media dari Facebook. Link tidak valid atau media tidak ditemukan.');
     return {
       success: false,
       error: 'Gagal mengambil media dari Facebook',
     };
   } catch (error) {
     console.error('Facebook download error:', error);
+    await sendErrorMessage(socket, fromJid, '❌ Gagal mendownload dari Facebook. Link mungkin privat atau tidak valid.');
     return {
       success: false,
       error: 'Gagal mendownload dari Facebook',
@@ -277,12 +296,14 @@ async function downloadTwitter(url: string, socket: WASocket, fromJid: string): 
       };
     }
 
+    await sendErrorMessage(socket, fromJid, '❌ Gagal mengambil media dari Twitter/X. Link tidak valid atau media tidak ditemukan.');
     return {
       success: false,
       error: 'Gagal mengambil media dari Twitter',
     };
   } catch (error) {
     console.error('Twitter download error:', error);
+    await sendErrorMessage(socket, fromJid, '❌ Gagal mendownload dari Twitter/X. Link mungkin privat atau tidak valid.');
     return {
       success: false,
       error: 'Gagal mendownload dari Twitter',
