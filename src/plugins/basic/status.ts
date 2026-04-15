@@ -1,6 +1,44 @@
 import type { CommandModule } from '../../types/index.js';
 import os from 'os';
 
+function getCpuUsage(): Promise<string> {
+  return new Promise((resolve) => {
+    const startMeasure = cpuAverage();
+
+    // Set delay for second measure
+    setTimeout(() => {
+      const endMeasure = cpuAverage();
+
+      // Calculate the difference in idle and total time between the measures
+      const idleDifference = endMeasure.idle - startMeasure.idle;
+      const totalDifference = endMeasure.total - startMeasure.total;
+
+      // Calculate the average percentage
+      const percentageCPU = 100 - ~~(100 * idleDifference / totalDifference);
+
+      resolve(percentageCPU.toFixed(2));
+    }, 100);
+  });
+}
+
+function cpuAverage() {
+  const cpus = os.cpus();
+  let totalIdle = 0;
+  let totalTick = 0;
+
+  for (const cpu of cpus) {
+    for (const type in cpu.times) {
+      totalTick += cpu.times[type as keyof typeof cpu.times];
+    }
+    totalIdle += cpu.times.idle;
+  }
+
+  return {
+    idle: totalIdle / cpus.length,
+    total: totalTick / cpus.length,
+  };
+}
+
 const statusCommand: CommandModule = {
   config: {
     name: 'status',
@@ -10,6 +48,9 @@ const statusCommand: CommandModule = {
     category: 'basic',
   },
   handler: async function (context, args: string[]): Promise<void> {
+    // Calculate CPU usage
+    const cpuUsage = await getCpuUsage();
+
     // Get system information
     const platform = os.platform();
     const arch = os.arch();
@@ -46,6 +87,7 @@ OS Version: ${release}
 Node.js: ${nodeVersion}
 CPU: ${cpuCores} cores
 CPU Model: ${cpuModel}
+CPU Usage: ${cpuUsage}%
 
 💾 *Memory Usage*
 Total: ${totalMemory} GB
