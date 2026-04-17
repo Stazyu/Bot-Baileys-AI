@@ -45,6 +45,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     libvips \
     openssl \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # copy hasil final saja
