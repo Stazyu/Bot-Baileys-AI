@@ -16,6 +16,7 @@ import { log } from '../utils/logger.js';
 import { useMultiFileAuthState } from '@innovatorssoft/baileys';
 import path from 'path';
 import QRCode from 'qrcode';
+import NodeCache from 'node-cache';
 
 export interface SessionConfig {
   sessionId: string;
@@ -39,6 +40,7 @@ export class SessionManager {
       ignore: 'pid,hostname',
     })
   );
+  private groupCache = new NodeCache({ stdTTL: 5 * 60, useClones: false });
 
   async createSession(sessionId: string, forceClear = false): Promise<WASocket> {
     // Check if session already exists
@@ -66,6 +68,7 @@ export class SessionManager {
       // browser: ['Bot-Baileys-AI', 'Chrome', '1.0.0'],
       browser: Browsers.windows('Bot-Baileys-AI'),
       generateHighQualityLinkPreview: true,
+      cachedGroupMetadata: async (jid) => this.groupCache.get(jid),
       getMessage: async (key) => {
         return (await prisma.message.findFirst({
           where: {
@@ -135,6 +138,32 @@ export class SessionManager {
 
     // Save credentials on update
     socket.ev.on('creds.update', saveCreds);
+
+    // Update group metadata cache on group updates
+    socket.ev.on('groups.update', async ([event]) => {
+      try {
+        if (event.id) {
+          const metadata = await socket.groupMetadata(event.id);
+          this.groupCache.set(event.id, metadata);
+          log.info(`📦 [SessionManager] Group metadata cached for: ${event.id}`);
+        }
+      } catch (error) {
+        log.error(`Error updating group metadata cache:`, error as object);
+      }
+    });
+
+    // Update group metadata cache on participant updates
+    socket.ev.on('group-participants.update', async (event) => {
+      try {
+        if (event.id) {
+          const metadata = await socket.groupMetadata(event.id);
+          this.groupCache.set(event.id, metadata);
+          log.info(`📦 [SessionManager] Group metadata cached for: ${event.id} (participants update)`);
+        }
+      } catch (error) {
+        log.error(`Error updating group metadata cache (participants):`, error as object);
+      }
+    });
 
     // Handle connection updates
     socket.ev.on('connection.update', async (update: Partial<ConnectionState>) => {
