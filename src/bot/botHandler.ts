@@ -341,7 +341,7 @@ export class BotHandler {
 
   private async processMessage(message: WAMessage, simplified: ReturnType<typeof this.simplified>): Promise<void> {
     try {
-      const { command, args, from, isCmd, body, fromMe, user_id } = simplified;
+      const { command, args, from, isCmd, body, isGroup, user_id } = simplified;
 
       // Check maintenance mode (only for commands, owners can bypass)
       if (isMaintenance() && isCmd && !isOwner(user_id || '')) {
@@ -352,7 +352,7 @@ export class BotHandler {
       }
 
       // Auto-detect social media links
-      if (body && !isCmd && from) {
+      if (body && !isCmd && from && !isGroup) {
         const socialLink = detectSocialMediaLink(body);
         if (socialLink) {
           console.log(`[${this.sessionId}] 🔗 Social media link detected: ${socialLink.platform} - ${socialLink.url}`);

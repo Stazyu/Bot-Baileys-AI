@@ -13,8 +13,6 @@ import { Prisma } from '@prisma/client';
 import prisma from '../database/prisma.js';
 import { useMultiFileAuthStateDB } from './authStateDB.js';
 import { log } from '../utils/logger.js';
-import { useMultiFileAuthState } from '@innovatorssoft/baileys';
-import path from 'path';
 import QRCode from 'qrcode';
 import NodeCache from 'node-cache';
 
