@@ -78,7 +78,7 @@ const statusCommand: CommandModule = {
 📱 *Session Info*
 Session: ${context.sessionId}
 Status: Online
-Connected to: ${context.fromJid}
+Connected to: ${context.simplified?.groupName || 'Unknown'}
 
 🖥️ *Server Info*
 OS: ${platform} (${arch})

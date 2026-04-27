@@ -3,6 +3,7 @@ import PluginManager from '../plugins/pluginManager.js';
 import { detectSocialMediaLink, downloadFromSocialMedia } from './autoDownload.js';
 import { getPrefixes, isMaintenance, getMaintenanceMessage, isOwner } from '../config/botConfig.js';
 import moment from 'moment';
+import NodeCache from 'node-cache';
 
 moment.locale('jv');
 
@@ -30,12 +31,14 @@ export class BotHandler {
   private socket: WASocket;
   private sessionId: string;
   private pluginManager: PluginManager;
+  private groupCache: NodeCache;
 
   constructor(socket: WASocket, sessionId: string) {
     console.log(`🤖 [BotHandler] Creating handler for session: ${sessionId}`);
     this.socket = socket;
     this.sessionId = sessionId;
     this.pluginManager = new PluginManager();
+    this.groupCache = new NodeCache({ stdTTL: 3600, checkperiod: 600 }); // Cache for 1 hour, check every 10 min
     this.setupEventHandlers();
     console.log(`✅ [BotHandler] Event handlers attached for session: ${sessionId}`);
   }
@@ -46,6 +49,31 @@ export class BotHandler {
 
   async unloadPlugins(): Promise<void> {
     await this.pluginManager.unloadPlugins();
+  }
+
+  private async getGroupName(jid: string): Promise<string | null> {
+    if (!jid.endsWith('@g.us')) return null;
+
+    // Check cache first
+    const cachedName = this.groupCache.get<string>(jid);
+    if (cachedName) {
+      return cachedName;
+    }
+
+    try {
+      const metadata = await this.socket.groupMetadata(jid);
+      const groupName = metadata.subject || null;
+
+      // Cache the result
+      if (groupName) {
+        this.groupCache.set(jid, groupName);
+      }
+
+      return groupName;
+    } catch (error) {
+      console.error('Error getting group name:', error);
+      return null;
+    }
   }
 
   private simplified(msg: WAMessage) {
@@ -89,6 +117,7 @@ export class BotHandler {
 
     /* ============ Meta Group ============= */
     const groupName = isGroup ? from : null;
+    console.log("Message : ", msg)
 
     /* ========== Message type ========== */
     const isMedia =
@@ -299,6 +328,15 @@ export class BotHandler {
       }
 
       const simplified = this.simplified(message);
+
+      // Get actual group name with caching
+      if (simplified.isGroup && simplified.from) {
+        const actualGroupName = await this.getGroupName(simplified.from);
+        if (actualGroupName) {
+          (simplified as any).groupName = actualGroupName;
+        }
+      }
+
       this.printLog(simplified);
       // console.log(`[${this.sessionId}] 💾 Message details -`, simplified);
 
