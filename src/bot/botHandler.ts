@@ -117,7 +117,6 @@ export class BotHandler {
 
     /* ============ Meta Group ============= */
     const groupName = isGroup ? from : null;
-    console.log("Message : ", msg)
 
     /* ========== Message type ========== */
     const isMedia =
