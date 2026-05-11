@@ -138,7 +138,6 @@ Size: ${(fileStats.size / 1024 / 1024).toFixed(2)}MB
   if (format === 'audio') {
     await context.socket.sendMessage(context.fromJid, {
       audio: { url: filePath },
-      caption,
       mimetype: 'audio/mpeg',
     });
   } else {
