@@ -36,6 +36,7 @@ Thumbs.db
 *.swp
 *.swo
 *~
+.windsurf
 
 # TypeScript
 *.tsbuildinfo

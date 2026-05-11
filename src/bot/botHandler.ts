@@ -4,6 +4,7 @@ import { detectSocialMediaLink, downloadFromSocialMedia } from './autoDownload.j
 import { getPrefixes, isMaintenance, getMaintenanceMessage, isOwner } from '../config/botConfig.js';
 import moment from 'moment';
 import NodeCache from 'node-cache';
+import { handleYouTubeButton } from '../utils/youtubeButtonHandler.js';
 
 moment.locale('jv');
 
@@ -396,6 +397,22 @@ export class BotHandler {
           await downloadFromSocialMedia(socialLink, this.socket, from);
           return;
         }
+      }
+
+      if (simplified.isTemplateButtonReplyMessage && simplified.message_button) {
+        const context = {
+          socket: this.socket,
+          sessionId: this.sessionId,
+          fromJid: from,
+          fromMe: simplified.fromMe ?? false,
+          pushName: simplified.pushName ?? undefined,
+          messageTimestamp: simplified.messageTimeStamp ? Number(simplified.messageTimeStamp) : undefined,
+          message,
+          simplified,
+          pluginManager: this.pluginManager,
+        };
+        await handleYouTubeButton(context, simplified.message_button);
+        return;
       }
 
       if (isCmd && command && from) {
