@@ -20,6 +20,7 @@ RUN pnpm install --frozen-lockfile
 
 # 🔥 WAJIB: rebuild sharp di environment Linux
 RUN pnpm rebuild sharp
+RUN pnpm rebuild youtube-dl-exec
 
 # Copy source
 COPY . .
