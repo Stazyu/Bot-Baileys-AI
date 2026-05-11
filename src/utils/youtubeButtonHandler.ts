@@ -88,12 +88,15 @@ async function downloadYouTubeMedia(context: CommandContext, url: string, format
   }
 
   const filePath = path.join(tempDir, output._filename);
-  const fileStats = await fs.stat(filePath);
+  const filePathMp3 = path.join(tempDir, output._filename.replace(/\.[^/.]+$/, '.mp3'));
+  const fileStats = await fs.stat(format === 'audio' ? filePathMp3 : filePath);
 
   if (fileStats.size > 50 * 1024 * 1024) {
     await context.socket.sendMessage(context.fromJid, {
       text: `⚠️ File size is ${(fileStats.size / 1024 / 1024).toFixed(2)}MB. WhatsApp has a 100MB limit for media files.`,
     });
+    await fs.unlink(format === 'audio' ? filePathMp3 : filePath);
+    return;
   }
 
   const formatDuration = (seconds?: number): string => {
@@ -137,7 +140,7 @@ Size: ${(fileStats.size / 1024 / 1024).toFixed(2)}MB
 
   if (format === 'audio') {
     await context.socket.sendMessage(context.fromJid, {
-      audio: { url: filePath },
+      audio: { url: filePathMp3 },
       mimetype: 'audio/mpeg',
     });
   } else {
@@ -150,7 +153,7 @@ Size: ${(fileStats.size / 1024 / 1024).toFixed(2)}MB
 
   setTimeout(async () => {
     try {
-      await fs.unlink(filePath);
+      await fs.unlink(format === 'audio' ? filePathMp3 : filePath);
     } catch (error) {
       console.error('Failed to cleanup file:', error);
     }
