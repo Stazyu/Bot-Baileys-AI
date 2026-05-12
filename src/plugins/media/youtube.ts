@@ -227,6 +227,13 @@ const youtubeCommand: CommandModule = {
                 display_text: '📹 720p',
                 id: `yt_720p_${Buffer.from(url).toString('base64')}`
               })
+            },
+            {
+              name: 'quick_reply',
+              buttonParamsJson: JSON.stringify({
+                display_text: '📹 Best Quality',
+                id: `yt_best_${Buffer.from(url).toString('base64')}`
+              })
             }
           ]
         };

@@ -41,6 +41,9 @@ export async function handleYouTubeButton(context: CommandContext, buttonId: str
     } else if (format === '720p') {
       downloadFormat = 'video';
       quality = '720p';
+    } else {
+      downloadFormat = 'video';
+      quality = 'best';
     }
 
     await downloadYouTubeMedia(context, url, downloadFormat, quality);
