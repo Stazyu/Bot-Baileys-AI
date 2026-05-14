@@ -1,0 +1,221 @@
+import axios from 'axios';
+
+interface OpenRouterMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+interface StreamChunk {
+  content: string;
+  done: boolean;
+}
+
+type StreamCallback = (chunk: StreamChunk) => void;
+
+export class AIService {
+  private apiKey: string;
+  private baseUrl = 'https://openrouter.ai/api/v1';
+  private model: string;
+  private conversationHistory: Map<string, OpenRouterMessage[]> = new Map();
+
+  constructor() {
+    this.apiKey = process.env.OPENROUTER_API_KEY || '';
+    this.model = process.env.OPENROUTER_MODEL || 'anthropic/claude-3-haiku';
+    
+    if (!this.apiKey) {
+      console.warn('⚠️ OPENROUTER_API_KEY is not set. AI features will be disabled.');
+    }
+  }
+
+  isConfigured(): boolean {
+    return !!this.apiKey;
+  }
+
+  async chat(
+    sessionId: string,
+    userMessage: string,
+    systemPrompt?: string
+  ): Promise<string> {
+    return this.chatWithSystem(sessionId, userMessage, systemPrompt);
+  }
+
+  async chatWithSystem(
+    sessionId: string,
+    userMessage: string,
+    systemPrompt?: string
+  ): Promise<string> {
+    if (!this.isConfigured()) {
+      throw new Error('AI service is not configured. Please set OPENROUTER_API_KEY in .env');
+    }
+
+    const messages = this.getConversationHistory(sessionId);
+
+    if (systemPrompt && messages.length === 0) {
+      messages.push({ role: 'system', content: systemPrompt });
+    }
+
+    messages.push({ role: 'user', content: userMessage });
+
+    try {
+      const response = await axios.post<any>(
+        `${this.baseUrl}/chat/completions`,
+        {
+          model: this.model,
+          messages: messages,
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 60000,
+        }
+      );
+
+      const assistantMessage = response.data.choices[0]?.message?.content || '';
+
+      messages.push({ role: 'assistant', content: assistantMessage });
+
+      this.conversationHistory.set(sessionId, messages);
+
+      return assistantMessage;
+    } catch (error: any) {
+      console.error('OpenRouter API Error:', error.response?.data || error.message);
+      throw new Error(
+        error.response?.data?.error?.message ||
+        error.response?.data?.error ||
+        'Failed to get AI response'
+      );
+    }
+  }
+
+  async chatStream(
+    sessionId: string,
+    userMessage: string,
+    systemPrompt?: string,
+    onChunk?: StreamCallback
+  ): Promise<string> {
+    if (!this.isConfigured()) {
+      throw new Error('AI service is not configured. Please set OPENROUTER_API_KEY in .env');
+    }
+
+    const messages = this.getConversationHistory(sessionId);
+
+    if (systemPrompt && messages.length === 0) {
+      messages.push({ role: 'system', content: systemPrompt });
+    }
+
+    messages.push({ role: 'user', content: userMessage });
+
+    try {
+      const response = await axios.post(
+        `${this.baseUrl}/chat/completions`,
+        {
+          model: this.model,
+          messages: messages,
+          stream: true,
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 120000,
+          responseType: 'stream',
+        }
+      );
+
+      let fullContent = '';
+      let buffer = '';
+
+      const stream = response.data;
+
+      return new Promise((resolve, reject) => {
+        stream.on('data', (chunk: Buffer) => {
+          const lines = chunk.toString().split('\n');
+          
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              
+              if (data === '[DONE]') {
+                if (onChunk) onChunk({ content: '', done: true });
+                messages.push({ role: 'assistant', content: fullContent });
+                this.conversationHistory.set(sessionId, messages);
+                resolve(fullContent);
+                return;
+              }
+
+              try {
+                const parsed = JSON.parse(data);
+                const content = parsed.choices?.[0]?.delta?.content;
+                
+                if (content) {
+                  fullContent += content;
+                  buffer += content;
+
+                  if (onChunk) {
+                    onChunk({ content: buffer, done: false });
+                  }
+                }
+              } catch (e) {
+                // Skip invalid JSON
+              }
+            }
+          }
+        });
+
+        stream.on('error', (error: any) => {
+          reject(new Error(error.message || 'Stream error'));
+        });
+
+        stream.on('end', () => {
+          if (fullContent) {
+            messages.push({ role: 'assistant', content: fullContent });
+            this.conversationHistory.set(sessionId, messages);
+            resolve(fullContent);
+          } else {
+            resolve('');
+          }
+        });
+      });
+    } catch (error: any) {
+      console.error('OpenRouter API Error:', error.response?.data || error.message);
+      throw new Error(
+        error.response?.data?.error?.message ||
+        error.response?.data?.error ||
+        'Failed to get AI response'
+      );
+    }
+  }
+
+  getConversationHistory(sessionId: string): OpenRouterMessage[] {
+    return this.conversationHistory.get(sessionId) || [];
+  }
+
+  clearConversation(sessionId: string): void {
+    this.conversationHistory.delete(sessionId);
+  }
+
+  setModel(model: string): void {
+    this.model = model;
+  }
+
+  getModel(): string {
+    return this.model;
+  }
+
+  static getAvailableModels(): string[] {
+    return [
+      'anthropic/claude-3-haiku',
+      'anthropic/claude-3-sonnet',
+      'openai/gpt-4o-mini',
+      'openai/gpt-4o',
+      'google/gemini-pro',
+      'meta-llama/llama-3-8b-instruct',
+      'mistralai/mistral-7b-instruct',
+    ];
+  }
+}
+
+export default new AIService();

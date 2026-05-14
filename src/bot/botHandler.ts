@@ -2,6 +2,7 @@ import type { WAMessage, WAMessageUpdate, WASocket } from '@innovatorssoft/baile
 import PluginManager from '../plugins/pluginManager.js';
 import { detectSocialMediaLink, downloadFromSocialMedia } from './autoDownload.js';
 import { getPrefixes, isMaintenance, getMaintenanceMessage, isOwner } from '../config/botConfig.js';
+import { isAIModeEnabled, handleAIMessage } from '../plugins/ai/aiCommand.js';
 import moment from 'moment';
 import NodeCache from 'node-cache';
 import { handleYouTubeButton } from '../utils/youtubeButtonHandler.js';
@@ -389,6 +390,13 @@ export class BotHandler {
         return;
       }
 
+      // Check if AI mode is enabled for this user (only for non-commands)
+      const aiEnabled = isAIModeEnabled(user_id || simplified.from || '');
+      if (!isCmd && aiEnabled && body && from) {
+        await this.handleAIMessage(simplified, body, from);
+        return;
+      }
+
       // Auto-detect social media links
       if (body && !isCmd && from && !isGroup) {
         const socialLink = detectSocialMediaLink(body);
@@ -438,6 +446,46 @@ export class BotHandler {
       }
     } catch (error) {
       console.error(`[${this.sessionId}] ❌ Error processing message:`, error);
+    }
+  }
+
+  private async handleAIMessage(simplified: ReturnType<typeof this.simplified>, message: string, to: string): Promise<void> {
+    try {
+      const userId = simplified.user_id || to;
+      const aiService = await import('../services/aiService.js');
+
+      const DEFAULT_SYSTEM_PROMPT = `Kamu adalah asisten AI yang helpful, friendly, dan bisa membantu berbagai tugas. Kamu bisa:
+- Menjawab pertanyaan
+- Menulis teks/cerita/cerpen
+- Menerjemahkan bahasa
+- Memberikan saran dan rekomendasi
+- Dan berbagai tugas lainnya
+
+- Jangan yang berhubungan dengan pemograman
+
+Selalu jawab dengan sopan dan helpful. Jika tidak tahu sesuatu, akui dan bilang kamu tidak tahu.
+
+Kamu adalah bot WhatsApp, jadi jawab dengan format yang sesuai untuk chat. Gunakan markdown seperlunya agar mudah dibaca di WhatsApp.`;
+
+      await this.socket.sendPresenceUpdate('composing', to);
+
+      let fullResponse = '';
+      await aiService.default.chatStream(userId, message, DEFAULT_SYSTEM_PROMPT, async (chunk: { content: string; done: boolean }) => {
+        if (!chunk.done && chunk.content) {
+          fullResponse = chunk.content;
+        }
+      });
+
+      await this.socket.sendPresenceUpdate('paused', to);
+
+      await this.socket.sendMessage(to, {
+        text: `✨ *AI Response:*\n\n${fullResponse}`,
+      });
+    } catch (error: any) {
+      console.error(`[${this.sessionId}] ❌ AI Error:`, error);
+      await this.socket.sendMessage(to, {
+        text: `❌ AI Error: ${error.message}`,
+      });
     }
   }
 
