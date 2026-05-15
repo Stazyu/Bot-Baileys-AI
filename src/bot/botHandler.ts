@@ -3,7 +3,7 @@ import { jidNormalizedUser, proto } from 'baileys';
 import PluginManager from '../plugins/pluginManager.js';
 import { detectSocialMediaLink, downloadFromSocialMedia } from './autoDownload.js';
 import { getPrefixes, isMaintenance, getMaintenanceMessage, isOwner } from '../config/botConfig.js';
-import { isAIModeEnabled, handleAIMessage } from '../plugins/ai/aiCommand.js';
+import { isAIModeEnabled } from '../plugins/ai/aiCommand.js';
 import moment from 'moment';
 import NodeCache from 'node-cache';
 import { handleYouTubeButton } from '../utils/youtubeButtonHandler.js';
