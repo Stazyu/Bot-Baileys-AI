@@ -1,4 +1,5 @@
 import type { WAMessage, WAMessageUpdate, WASocket } from '@innovatorssoft/baileys';
+import { jidNormalizedUser, proto } from 'baileys';
 import PluginManager from '../plugins/pluginManager.js';
 import { detectSocialMediaLink, downloadFromSocialMedia } from './autoDownload.js';
 import { getPrefixes, isMaintenance, getMaintenanceMessage, isOwner } from '../config/botConfig.js';
@@ -34,7 +35,6 @@ export class BotHandler {
   private sessionId: string;
   private pluginManager: PluginManager;
   private groupCache: NodeCache;
-  private firstGreetCache: NodeCache;
 
   constructor(socket: WASocket, sessionId: string) {
     console.log(`🤖 [BotHandler] Creating handler for session: ${sessionId}`);
@@ -42,9 +42,8 @@ export class BotHandler {
     this.sessionId = sessionId;
     this.pluginManager = new PluginManager();
     this.groupCache = new NodeCache({ stdTTL: 3600, checkperiod: 600 });
-    this.firstGreetCache = new NodeCache({ stdTTL: 600, checkperiod: 60 }); // 10 menit
     this.setupEventHandlers();
-    console.log(`✅ [BotHandler] Event handlers attached for session: ${sessionId}`);
+    console.log(`✅ [BotHandler] Event handlers attached for session: ${this.sessionId}`);
   }
 
   async loadPlugins(): Promise<void> {
@@ -80,7 +79,7 @@ export class BotHandler {
     }
   }
 
-  private simplified(msg: WAMessage) {
+  private simplified(msg: proto.IWebMessageInfo) {
     // console.log('msg :', msg);
     const chatMessage = msg.message;
     const id = msg.key?.id;
@@ -341,7 +340,7 @@ export class BotHandler {
       }
 
       this.printLog(simplified);
-      // console.log(`[${this.sessionId}] 💾 Message details -`, simplified);
+      console.log(`[${this.sessionId}] 💾 Message details -`, simplified);
 
       // Save message to database
       // await prisma.message.create({
@@ -396,18 +395,18 @@ export class BotHandler {
       if (isGroup && !isCmd && from) {
         const botNumber = this.socket.user?.id?.split(':')[0];
         const botJid = botNumber + '@s.whatsapp.net';
-        
+
         const isBotMentioned = (simplified.mentions as string[])?.includes(botJid);
-        const greetingWords = ['hallo', 'halo', 'p', 'hai', 'hello', 'helo', 'yo', 'hii', 'pagi', 'siang', 'sore', 'malam', 'bot'];
-        const isGreeting = greetingWords.some(g => (rawMessage as string)?.toLowerCase().includes(g));
 
         let isReplyToBot = false;
         if (quotedInfo?.quotedMessage) {
-          const quotedParticipant = (quotedInfo as any).participant;
+          const quotedParticipant = jidNormalizedUser(quotedInfo.participant!!);
           isReplyToBot = quotedParticipant?.includes(botNumber || '') || false;
+          console.log('quotedParticipant:', quotedParticipant, botNumber);
         }
 
-        if (isBotMentioned || isGreeting || isReplyToBot) {
+        if (isBotMentioned || isReplyToBot) {
+          console.log(`[${this.sessionId}] 🤖 Group auto-reply triggered for: ${from}`);
           await this.handleGroupAutoReply(simplified, from);
           return;
         }
@@ -434,7 +433,7 @@ export class BotHandler {
         const context = {
           socket: this.socket,
           sessionId: this.sessionId,
-          fromJid: from,
+          fromJid: from!!,
           fromMe: simplified.fromMe ?? false,
           pushName: simplified.pushName ?? undefined,
           messageTimestamp: simplified.messageTimeStamp ? Number(simplified.messageTimeStamp) : undefined,
@@ -477,12 +476,6 @@ export class BotHandler {
       const message = simplified.message || simplified.body || '';
       const userId = simplified.user_id || to;
       const pushName = simplified.pushName || 'Kak';
-      
-      const cacheKey = `${to}:${userId}`;
-      const isFirstMessage = !this.firstGreetCache.get(cacheKey);
-      if (isFirstMessage) {
-        this.firstGreetCache.set(cacheKey, true);
-      }
 
       const aiService = await import('../services/aiService.js');
 
@@ -490,7 +483,22 @@ export class BotHandler {
 Selalu jawab dengan sopan dan ramah.
 Jangan gunakan nama user dalam respons kamu.
 Jangan terlalu panjang, jawab dengan singkat dan friendly.
-Jangan yang berhubungan dengan pemograman.`;
+Jangan yang berhubungan dengan pemograman.
+
+Jika user menyapamu atau menggunakan kata sapaan (seperti: hallo, halo, hai, pagi, siang, sore, malam, bot, kak, bang, dll), TOLONG tambahkan "Halo ${pushName}! 👋" di AWAL respons kamu, sebelum menjawab pertanyaan mereka.
+
+Contoh:
+User: "halo bot"
+Kamu: "Halo Kak! 👋 Ada yang bisa saya bantu?"
+
+User: "pagi"
+Kamu: "Halo Kak! 👋 Selamat pagi! Ada yang perlu bantuan?"
+
+Tapi jika user TIDAK menyapa (hanya bertanya biasa), langsung jawab tanpa sapaan.
+
+Contoh:
+User: "1 + 1 berapa"
+Kamu: "1 + 1 = 2"`;
 
       await this.socket.sendPresenceUpdate('composing', to);
 
@@ -503,14 +511,13 @@ Jangan yang berhubungan dengan pemograman.`;
 
       await this.socket.sendPresenceUpdate('paused', to);
 
-      const greeting = isFirstMessage ? `Halo ${pushName}! 👋\n\n` : '';
       await this.socket.sendMessage(to, {
-        text: `${greeting}${fullResponse}`,
+        text: fullResponse,
       });
     } catch (error: any) {
       console.error(`[${this.sessionId}] ❌ Group Auto-Reply Error:`, error);
       await this.socket.sendMessage(to, {
-        text: `❌ Maaf, ada masalah saat memproses pesan.`,
+        text: `❌ Maaf, ada masalah: ${error.message || 'Server sedang sibuk, coba lagi sebentar'}`,
       });
     }
   }

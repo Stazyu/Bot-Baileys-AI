@@ -134,6 +134,33 @@ export class AIService {
       const stream = response.data;
 
       return new Promise((resolve, reject) => {
+        let timeoutId: NodeJS.Timeout;
+        let resolved = false;
+
+        const finish = (content: string, isError = false) => {
+          if (resolved) return;
+          resolved = true;
+          clearTimeout(timeoutId);
+          
+          if (content || !isError) {
+            if (content) {
+              messages.push({ role: 'assistant', content });
+              this.conversationHistory.set(sessionId, messages);
+              this.setExpiry(sessionId);
+            }
+            resolve(content);
+          } else {
+            reject(new Error('Empty response from AI'));
+          }
+        };
+
+        timeoutId = setTimeout(() => {
+          if (!resolved) {
+            stream.emit('end');
+            finish(fullContent || '', true);
+          }
+        }, 60000);
+
         stream.on('data', (chunk: Buffer) => {
           const lines = chunk.toString().split('\n');
           
@@ -143,10 +170,7 @@ export class AIService {
               
               if (data === '[DONE]') {
                 if (onChunk) onChunk({ content: '', done: true });
-                messages.push({ role: 'assistant', content: fullContent });
-                this.conversationHistory.set(sessionId, messages);
-                this.setExpiry(sessionId);
-                resolve(fullContent);
+                finish(fullContent);
                 return;
               }
 
@@ -170,25 +194,23 @@ export class AIService {
         });
 
         stream.on('error', (error: any) => {
-          reject(new Error(error.message || 'Stream error'));
+          clearTimeout(timeoutId);
+          if (!resolved) {
+            resolved = true;
+            reject(new Error(error.message || 'Stream error'));
+          }
         });
 
         stream.on('end', () => {
-          if (fullContent) {
-            messages.push({ role: 'assistant', content: fullContent });
-            this.conversationHistory.set(sessionId, messages);
-            this.setExpiry(sessionId);
-            resolve(fullContent);
-          } else {
-            resolve('');
-          }
+          finish(fullContent);
         });
       });
     } catch (error: any) {
       console.error('OpenRouter API Error:', error.response?.data || error.message);
       throw new Error(
         error.response?.data?.error?.message ||
-        error.response?.data?.error ||
+        error.response?.data?.error?.message ||
+        error.message ||
         'Failed to get AI response'
       );
     }
