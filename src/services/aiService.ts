@@ -17,6 +17,8 @@ export class AIService {
   private baseUrl = 'https://openrouter.ai/api/v1';
   private model: string;
   private conversationHistory: Map<string, OpenRouterMessage[]> = new Map();
+  private conversationExpiry: Map<string, number> = new Map();
+  private readonly GROUP_EXPIRY_MS = 10 * 60 * 1000; // 10 menit untuk grup
 
   constructor() {
     this.apiKey = process.env.OPENROUTER_API_KEY || '';
@@ -77,6 +79,7 @@ export class AIService {
       messages.push({ role: 'assistant', content: assistantMessage });
 
       this.conversationHistory.set(sessionId, messages);
+      this.setExpiry(sessionId);
 
       return assistantMessage;
     } catch (error: any) {
@@ -142,6 +145,7 @@ export class AIService {
                 if (onChunk) onChunk({ content: '', done: true });
                 messages.push({ role: 'assistant', content: fullContent });
                 this.conversationHistory.set(sessionId, messages);
+                this.setExpiry(sessionId);
                 resolve(fullContent);
                 return;
               }
@@ -173,6 +177,7 @@ export class AIService {
           if (fullContent) {
             messages.push({ role: 'assistant', content: fullContent });
             this.conversationHistory.set(sessionId, messages);
+            this.setExpiry(sessionId);
             resolve(fullContent);
           } else {
             resolve('');
@@ -190,11 +195,33 @@ export class AIService {
   }
 
   getConversationHistory(sessionId: string): OpenRouterMessage[] {
+    this.checkAndClearExpired(sessionId);
     return this.conversationHistory.get(sessionId) || [];
   }
 
   clearConversation(sessionId: string): void {
     this.conversationHistory.delete(sessionId);
+    this.conversationExpiry.delete(sessionId);
+  }
+
+  private isGroupSession(sessionId: string): boolean {
+    return sessionId.includes('@g.us');
+  }
+
+  private checkAndClearExpired(sessionId: string): void {
+    if (this.isGroupSession(sessionId)) {
+      const expiry = this.conversationExpiry.get(sessionId);
+      if (expiry && Date.now() > expiry) {
+        this.conversationHistory.delete(sessionId);
+        this.conversationExpiry.delete(sessionId);
+      }
+    }
+  }
+
+  private setExpiry(sessionId: string): void {
+    if (this.isGroupSession(sessionId)) {
+      this.conversationExpiry.set(sessionId, Date.now() + this.GROUP_EXPIRY_MS);
+    }
   }
 
   setModel(model: string): void {
