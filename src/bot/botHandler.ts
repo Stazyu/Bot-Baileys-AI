@@ -380,7 +380,7 @@ export class BotHandler {
 
   private async processMessage(message: WAMessage, simplified: ReturnType<typeof this.simplified>): Promise<void> {
     try {
-      const { command, args, from, isCmd, body, isGroup, user_id, mentions, message: rawMessage } = simplified;
+      const { command, args, from, isCmd, body, isGroup, user_id, mentions, message: rawMessage, quotedInfo } = simplified;
 
       // Check maintenance mode (only for commands, owners can bypass)
       if (isMaintenance() && isCmd && !isOwner(user_id || '')) {
@@ -390,14 +390,21 @@ export class BotHandler {
         return;
       }
 
-      // Group auto-reply: respond when bot is tagged or greeted
+      // Group auto-reply: respond when bot is tagged, greeted, or replied
       if (isGroup && !isCmd && from) {
         const botNumber = this.socket.user?.id?.split(':')[0];
         const isBotMentioned = (mentions as string[] | undefined)?.some((m: string) => m.includes(botNumber || ''));
         const greetingWords = ['hallo', 'halo', 'p', 'hai', 'hello', 'helo', 'yo', 'hii', 'pagi', 'siang', 'sore', 'malam', 'bot'];
         const isGreeting = greetingWords.some(g => rawMessage?.toLowerCase().includes(g)) || isBotMentioned;
 
-        if (isGreeting) {
+        // Check if message is a reply to bot's message
+        let isReplyToBot = false;
+        if (quotedInfo?.quotedMessage) {
+          const quotedSender = (quotedInfo as any).participant || (quotedInfo as any).remoteJid || '';
+          isReplyToBot = quotedSender.includes(botNumber || '');
+        }
+
+        if (isGreeting || isReplyToBot) {
           await this.handleGroupAutoReply(simplified, from);
           return;
         }
