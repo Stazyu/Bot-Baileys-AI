@@ -393,18 +393,19 @@ export class BotHandler {
       // Group auto-reply: respond when bot is tagged, greeted, or replied
       if (isGroup && !isCmd && from) {
         const botNumber = this.socket.user?.id?.split(':')[0];
-        const isBotMentioned = (mentions as string[] | undefined)?.some((m: string) => m.includes(botNumber || ''));
+        const botJid = botNumber + '@s.whatsapp.net';
+        
+        const isBotMentioned = (simplified.mentions as string[])?.includes(botJid);
         const greetingWords = ['hallo', 'halo', 'p', 'hai', 'hello', 'helo', 'yo', 'hii', 'pagi', 'siang', 'sore', 'malam', 'bot'];
-        const isGreeting = greetingWords.some(g => rawMessage?.toLowerCase().includes(g)) || isBotMentioned;
+        const isGreeting = greetingWords.some(g => (rawMessage as string)?.toLowerCase().includes(g));
 
-        // Check if message is a reply to bot's message
         let isReplyToBot = false;
         if (quotedInfo?.quotedMessage) {
-          const quotedSender = (quotedInfo as any).participant || (quotedInfo as any).remoteJid || '';
-          isReplyToBot = quotedSender.includes(botNumber || '');
+          const quotedParticipant = (quotedInfo as any).participant;
+          isReplyToBot = quotedParticipant?.includes(botNumber || '') || false;
         }
 
-        if (isGreeting || isReplyToBot) {
+        if (isBotMentioned || isGreeting || isReplyToBot) {
           await this.handleGroupAutoReply(simplified, from);
           return;
         }
