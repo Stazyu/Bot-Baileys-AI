@@ -380,7 +380,7 @@ export class BotHandler {
 
   private async processMessage(message: WAMessage, simplified: ReturnType<typeof this.simplified>): Promise<void> {
     try {
-      const { command, args, from, isCmd, body, isGroup, user_id } = simplified;
+      const { command, args, from, isCmd, body, isGroup, user_id, mentions, message: rawMessage } = simplified;
 
       // Check maintenance mode (only for commands, owners can bypass)
       if (isMaintenance() && isCmd && !isOwner(user_id || '')) {
@@ -388,6 +388,19 @@ export class BotHandler {
           await this.socket.sendMessage(from, { text: getMaintenanceMessage() });
         }
         return;
+      }
+
+      // Group auto-reply: respond when bot is tagged or greeted
+      if (isGroup && !isCmd && from) {
+        const botNumber = this.socket.user?.id?.split(':')[0];
+        const isBotMentioned = (mentions as string[] | undefined)?.some((m: string) => m.includes(botNumber || ''));
+        const greetingWords = ['hallo', 'halo', 'p', 'hai', 'hello', 'helo', 'yo', 'hii', 'pagi', 'siang', 'sore', 'malam', 'bot'];
+        const isGreeting = greetingWords.some(g => rawMessage?.toLowerCase().includes(g)) || isBotMentioned;
+
+        if (isGreeting) {
+          await this.handleGroupAutoReply(simplified, from);
+          return;
+        }
       }
 
       // Check if AI mode is enabled for this user (only for non-commands)
@@ -449,8 +462,60 @@ export class BotHandler {
     }
   }
 
+  private async handleGroupAutoReply(simplified: ReturnType<typeof this.simplified>, to: string): Promise<void> {
+    try {
+      const message = simplified.message || simplified.body || '';
+      const userId = simplified.user_id || to;
+      const pushName = simplified.pushName || 'Kak';
+
+      const aiService = await import('../services/aiService.js');
+
+      const GROUP_SYSTEM_PROMPT = `Kamu adalah asisten AI yang friendly dan helpful di grup WhatsApp.
+Selalu jawab dengan sopan dan ramah. Panggil user dengan nama mereka: "${pushName}".
+Jangan terlalu panjang, jawab dengan singkat dan friendly.
+Jangan yang berhubungan dengan pemograman.`;
+
+      await this.socket.sendPresenceUpdate('composing', to);
+
+      let fullResponse = '';
+      await aiService.default.chatStream(userId, message, GROUP_SYSTEM_PROMPT, async (chunk: { content: string; done: boolean }) => {
+        if (!chunk.done && chunk.content) {
+          fullResponse = chunk.content;
+        }
+      });
+
+      await this.socket.sendPresenceUpdate('paused', to);
+
+      await this.socket.sendMessage(to, {
+        text: `Halo ${pushName}! 👋\n\n${fullResponse}`,
+      });
+    } catch (error: any) {
+      console.error(`[${this.sessionId}] ❌ Group Auto-Reply Error:`, error);
+      await this.socket.sendMessage(to, {
+        text: `❌ Maaf, ada masalah saat memproses pesan.`,
+      });
+    }
+  }
+
   private async handleAIMessage(simplified: ReturnType<typeof this.simplified>, message: string, to: string): Promise<void> {
     try {
+      const socialLink = detectSocialMediaLink(message);
+      const downloadKeywords = ['download', 'tolong', 'bantu', 'grab', 'ambil', 'get'];
+      const hasDownloadIntent = downloadKeywords.some(k => message.toLowerCase().includes(k));
+
+      if (socialLink && hasDownloadIntent) {
+        await this.socket.sendMessage(to, {
+          text: `🔗 Download dimulai...`,
+        });
+        const result = await downloadFromSocialMedia(socialLink, this.socket, to);
+        if (!result.success) {
+          await this.socket.sendMessage(to, {
+            text: `❌ Maaf, link tidak didukung atau gagal didownload.`,
+          });
+        }
+        return;
+      }
+
       const userId = simplified.user_id || to;
       const aiService = await import('../services/aiService.js');
 

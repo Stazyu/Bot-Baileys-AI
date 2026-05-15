@@ -1,16 +1,27 @@
+import type { WASocket } from '@innovatorssoft/baileys';
 import type { CommandModule } from '../../types/index.js';
 import aiService, { AIService } from '../../services/aiService.js';
+import { detectSocialMediaLink, downloadFromSocialMedia, type SocialMediaLink } from '../../bot/autoDownload.js';
 import { isOwner } from '../../config/botConfig.js';
 
 const ACTIVE_SESSIONS = new Map<string, { enabled: boolean; mode: 'single' | 'chat' }>();
 
 const DEFAULT_SYSTEM_PROMPT = `Kamu adalah asisten AI yang helpful, friendly, dan bisa membantu berbagai tugas. Kamu bisa:
 - Menjawab pertanyaan
-- Membantu coding/programming
+- Jangan membantu coding/programming
 - Menulis teks/cerita/cerpen
 - Menerjemahkan bahasa
 - Memberikan saran dan rekomendasi
 - Dan berbagai tugas lainnya
+
+Jika user meminta untuk download media (foto/video dari Instagram, TikTok, Facebook, Twitter/X, YouTube), segera proses download tanpa perlu konfirmasi. Deteksi link social media dari pesan user dan download media tersebut.
+
+Platform yang didukung:
+- Instagram (instagram.com)
+- TikTok (tiktok.com)
+- Facebook (facebook.com, fb.watch)
+- Twitter/X (twitter.com, x.com)
+- YouTube (youtube.com, youtu.be)
 
 Selalu jawab dengan sopan dan helpful. Jika tidak tahu sesuatu, akui dan bilang kamu tidak tahu.`;
 
@@ -85,6 +96,17 @@ const AICommand: CommandModule = {
     }
 
     const question = args.join(' ');
+
+    const socialLink = detectSocialMediaLink(question);
+    if (socialLink) {
+      await context.socket.sendPresenceUpdate('composing', context.fromJid);
+      await context.socket.sendMessage(context.fromJid, {
+        text: `🔗 Link ${socialLink.platform} terdeteksi! Sedang mendownload...`,
+      });
+      await downloadFromSocialMedia(socialLink, context.socket, context.fromJid);
+      return;
+    }
+
     if (!question) {
       await context.socket.sendMessage(context.fromJid, {
         text: `📖 *Cara Penggunaan AI:*
