@@ -478,7 +478,7 @@ export class BotHandler {
       const aiService = await import('../services/aiService.js');
 
       const GROUP_SYSTEM_PROMPT = `Kamu adalah asisten AI yang friendly dan helpful di grup WhatsApp.
-Selalu jawab dengan sopan dan ramah. Panggil user dengan nama mereka: "${pushName}".
+Selalu jawab dengan sopan dan ramah. Panggil user dengan nama mereka "Pas Awal ngechat aja" : "${pushName}".
 Jangan terlalu panjang, jawab dengan singkat dan friendly.
 Jangan yang berhubungan dengan pemograman.`;
 
