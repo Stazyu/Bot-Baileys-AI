@@ -406,7 +406,7 @@ export class BotHandler {
 
         if (isBotMentioned || isReplyToBot) {
           console.log(`[${this.sessionId}] 🤖 Group auto-reply triggered for: ${from}`);
-          await this.handleGroupAutoReply(simplified, from);
+          await this.handleGroupAutoReply(simplified, from, message);
           return;
         }
       }
@@ -414,7 +414,7 @@ export class BotHandler {
       // Check if AI mode is enabled for this user (only for non-commands)
       const aiEnabled = isAIModeEnabled(user_id || simplified.from || '');
       if (!isCmd && aiEnabled && body && from) {
-        await this.handleAIMessage(simplified, body, from);
+        await this.handleAIMessage(simplified, body, from, message);
         return;
       }
 
@@ -470,7 +470,7 @@ export class BotHandler {
     }
   }
 
-  private async handleGroupAutoReply(simplified: ReturnType<typeof this.simplified>, to: string): Promise<void> {
+  private async handleGroupAutoReply(simplified: ReturnType<typeof this.simplified>, to: string, originalMessage: WAMessage): Promise<void> {
     try {
       const message = simplified.message || simplified.body || '';
       const userId = simplified.user_id || to;
@@ -509,9 +509,19 @@ Kamu: "1 + 1 = 2"`;
 
       await this.socket.sendPresenceUpdate('paused', to);
 
+      const quotedMessageObj = proto.WebMessageInfo.fromObject({
+        key: {
+          remoteJid: simplified.from,
+          fromMe: false,
+          id: simplified.id,
+          participant: simplified.participant || simplified.user_id,
+        },
+        message: originalMessage.message as proto.IMessage,
+      });
+
       await this.socket.sendMessage(to, {
         text: fullResponse,
-      });
+      }, { quoted: quotedMessageObj });
     } catch (error: any) {
       console.error(`[${this.sessionId}] ❌ Group Auto-Reply Error:`, error);
       await this.socket.sendMessage(to, {
@@ -520,7 +530,7 @@ Kamu: "1 + 1 = 2"`;
     }
   }
 
-  private async handleAIMessage(simplified: ReturnType<typeof this.simplified>, message: string, to: string): Promise<void> {
+  private async handleAIMessage(simplified: ReturnType<typeof this.simplified>, message: string, to: string, originalMessage: WAMessage): Promise<void> {
     try {
       const socialLink = detectSocialMediaLink(message);
       const downloadKeywords = ['download', 'tolong', 'bantu', 'grab', 'ambil', 'get'];
@@ -566,9 +576,19 @@ Kamu adalah bot WhatsApp, jadi jawab dengan format yang sesuai untuk chat. Gunak
 
       await this.socket.sendPresenceUpdate('paused', to);
 
+      const quotedMessageObj = proto.WebMessageInfo.fromObject({
+        key: {
+          remoteJid: simplified.from,
+          fromMe: false,
+          id: simplified.id,
+          participant: simplified.participant || simplified.user_id,
+        },
+        message: originalMessage.message as proto.IMessage,
+      });
+
       await this.socket.sendMessage(to, {
         text: `✨ *AI Response:*\n\n${fullResponse}`,
-      });
+      }, { quoted: quotedMessageObj });
     } catch (error: any) {
       console.error(`[${this.sessionId}] ❌ AI Error:`, error);
       await this.socket.sendMessage(to, {
