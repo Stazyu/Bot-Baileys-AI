@@ -34,13 +34,15 @@ export class BotHandler {
   private sessionId: string;
   private pluginManager: PluginManager;
   private groupCache: NodeCache;
+  private firstGreetCache: NodeCache;
 
   constructor(socket: WASocket, sessionId: string) {
     console.log(`🤖 [BotHandler] Creating handler for session: ${sessionId}`);
     this.socket = socket;
     this.sessionId = sessionId;
     this.pluginManager = new PluginManager();
-    this.groupCache = new NodeCache({ stdTTL: 3600, checkperiod: 600 }); // Cache for 1 hour, check every 10 min
+    this.groupCache = new NodeCache({ stdTTL: 3600, checkperiod: 600 });
+    this.firstGreetCache = new NodeCache({ stdTTL: 600, checkperiod: 60 }); // 10 menit
     this.setupEventHandlers();
     console.log(`✅ [BotHandler] Event handlers attached for session: ${sessionId}`);
   }
@@ -475,6 +477,12 @@ export class BotHandler {
       const message = simplified.message || simplified.body || '';
       const userId = simplified.user_id || to;
       const pushName = simplified.pushName || 'Kak';
+      
+      const cacheKey = `${to}:${userId}`;
+      const isFirstMessage = !this.firstGreetCache.get(cacheKey);
+      if (isFirstMessage) {
+        this.firstGreetCache.set(cacheKey, true);
+      }
 
       const aiService = await import('../services/aiService.js');
 
@@ -495,8 +503,9 @@ Jangan yang berhubungan dengan pemograman.`;
 
       await this.socket.sendPresenceUpdate('paused', to);
 
+      const greeting = isFirstMessage ? `Halo ${pushName}! 👋\n\n` : '';
       await this.socket.sendMessage(to, {
-        text: `Halo ${pushName}! 👋\n\n${fullResponse}`,
+        text: `${greeting}${fullResponse}`,
       });
     } catch (error: any) {
       console.error(`[${this.sessionId}] ❌ Group Auto-Reply Error:`, error);
