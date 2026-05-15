@@ -61,7 +61,7 @@ export class SessionManager {
 
     const socket = makeWASocket({
       auth: state,
-      version: [2, 3000, 1035194821],
+      version: [2, 3000, 1039568566],
       logger: this.logger,
       // browser: ['Bot-Baileys-AI', 'Chrome', '1.0.0'],
       browser: Browsers.windows('Bot-Baileys-AI'),

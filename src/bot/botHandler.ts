@@ -1,5 +1,6 @@
 import type { WAMessage, WAMessageUpdate, WASocket } from '@innovatorssoft/baileys';
-import { jidNormalizedUser, proto } from 'baileys';
+import { plotJid } from '@innovatorssoft/baileys';
+import { proto } from 'baileys';
 import PluginManager from '../plugins/pluginManager.js';
 import { detectSocialMediaLink, downloadFromSocialMedia } from './autoDownload.js';
 import { getPrefixes, isMaintenance, getMaintenanceMessage, isOwner } from '../config/botConfig.js';
@@ -87,6 +88,7 @@ export class BotHandler {
     const fromMe = msg.key?.fromMe;
     const participant = msg.key?.participant;
     const isGroup = from?.endsWith('@g.us');
+    console.log("Message : ", msg.message?.extendedTextMessage)
     const type = !!chatMessage
       ? (Object.keys(chatMessage!).filter((v, i) => v !== 'messageContextInfo')[0] as MessageType)
       : null;
@@ -98,11 +100,11 @@ export class BotHandler {
     const messageTimeStamp = msg.messageTimestamp;
     const timeStampHandler = Date.now();
     const quotedInfo =
-      type === 'extendedTextMessage' && msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
+      type === 'extendedTextMessage' && (msg.message?.extendedTextMessage?.contextInfo?.quotedMessage || msg.message?.extendedTextMessage?.contextInfo?.mentionedJid)
         ? msg.message?.extendedTextMessage?.contextInfo
         : undefined;
-    const quotedType = !!quotedInfo
-      ? (Object.getOwnPropertyNames(quotedInfo?.quotedMessage)[0] as MessageType)
+    const quotedMessageType = quotedInfo?.quotedMessage
+      ? (Object.getOwnPropertyNames(quotedInfo.quotedMessage)[0] as MessageType)
       : undefined;
 
     const prefixes = getPrefixes();
@@ -133,11 +135,11 @@ export class BotHandler {
     const isButtonResponseMessage = type === 'buttonsResponseMessage';
     const isTemplateButtonReplyMessage = type === 'templateButtonReplyMessage';
     const isListResponseMessage = type === 'listResponseMessage';
-    const isQuotedAudio = type === 'extendedTextMessage' && quotedType === 'audioMessage';
-    const isQuotedImage = type === 'extendedTextMessage' && quotedType === 'imageMessage';
-    const isQuotedVideo = type === 'extendedTextMessage' && quotedType === 'videoMessage';
-    const isQuotedSticker = type === 'extendedTextMessage' && quotedType === 'stickerMessage';
-    const isQuotedDocument = type === 'extendedTextMessage' && quotedType === 'documentMessage';
+    const isQuotedAudio = type === 'extendedTextMessage' && quotedMessageType === 'audioMessage';
+    const isQuotedImage = type === 'extendedTextMessage' && quotedMessageType === 'imageMessage';
+    const isQuotedVideo = type === 'extendedTextMessage' && quotedMessageType === 'videoMessage';
+    const isQuotedSticker = type === 'extendedTextMessage' && quotedMessageType === 'stickerMessage';
+    const isQuotedDocument = type === 'extendedTextMessage' && quotedMessageType === 'documentMessage';
     const isQuotedMedia = isQuotedAudio || isQuotedImage || isQuotedVideo || isQuotedSticker || isQuotedDocument;
 
     // Check if message starts with any of the configured prefixes
@@ -214,7 +216,7 @@ export class BotHandler {
       messageTimeStamp,
       timeStampHandler,
       quotedInfo,
-      quotedType,
+      quotedMessageType,
       botNumber,
       mentions,
       user_id,
@@ -381,7 +383,7 @@ export class BotHandler {
 
   private async processMessage(message: WAMessage, simplified: ReturnType<typeof this.simplified>): Promise<void> {
     try {
-      const { command, args, from, isCmd, body, isGroup, user_id, mentions, message: rawMessage, quotedInfo } = simplified;
+      const { command, args, botNumber, from, isCmd, body, isGroup, user_id, mentions, message: rawMessage, quotedInfo } = simplified;
 
       // Check maintenance mode (only for commands, owners can bypass)
       if (isMaintenance() && isCmd && !isOwner(user_id || '')) {
@@ -393,16 +395,14 @@ export class BotHandler {
 
       // Group auto-reply: respond when bot is tagged, greeted, or replied
       if (isGroup && !isCmd && from) {
-        const botNumber = this.socket.user?.id?.split(':')[0];
-        const botJid = botNumber + '@s.whatsapp.net';
 
-        const isBotMentioned = (simplified.mentions as string[])?.includes(botJid);
+        const botNumberLid = "117351475355648@lid"
+        const isBotMentioned = (mentions || []).some((m: string) => m.includes(botNumberLid));
 
         let isReplyToBot = false;
         if (quotedInfo?.quotedMessage) {
-          const quotedParticipant = jidNormalizedUser(quotedInfo.participant!!);
-          isReplyToBot = quotedParticipant?.includes(botNumber || '') || false;
-          console.log('quotedParticipant:', quotedParticipant, botNumber);
+          const quotedParticipant = quotedInfo.participant;
+          isReplyToBot = quotedParticipant?.includes(botNumberLid) || false;
         }
 
         if (isBotMentioned || isReplyToBot) {
@@ -481,18 +481,17 @@ export class BotHandler {
 
       const GROUP_SYSTEM_PROMPT = `Kamu adalah asisten AI yang friendly dan helpful di grup WhatsApp.
 Selalu jawab dengan sopan dan ramah.
-Jangan gunakan nama user dalam respons kamu.
-Jangan terlalu panjang, jawab dengan singkat dan friendly.
+Jangan terlalu panjang, jawab tergantung konteks jadi bisa panjang atau pendek dan friendly.
 Jangan yang berhubungan dengan pemograman.
 
 Jika user menyapamu atau menggunakan kata sapaan (seperti: hallo, halo, hai, pagi, siang, sore, malam, bot, kak, bang, dll), TOLONG tambahkan "Halo ${pushName}! 👋" di AWAL respons kamu, sebelum menjawab pertanyaan mereka.
 
 Contoh:
 User: "halo bot"
-Kamu: "Halo Kak! 👋 Ada yang bisa saya bantu?"
+Kamu: "Halo ${pushName} 👋 \n\nAda yang bisa saya bantu?"
 
 User: "pagi"
-Kamu: "Halo Kak! 👋 Selamat pagi! Ada yang perlu bantuan?"
+Kamu: "Halo ${pushName}! 👋 \n\nSelamat pagi! Ada yang perlu bantuan?"
 
 Tapi jika user TIDAK menyapa (hanya bertanya biasa), langsung jawab tanpa sapaan.
 
