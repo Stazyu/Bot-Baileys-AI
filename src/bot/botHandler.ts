@@ -88,7 +88,6 @@ export class BotHandler {
     const fromMe = msg.key?.fromMe;
     const participant = msg.key?.participant;
     const isGroup = from?.endsWith('@g.us');
-    console.log("Message : ", msg.message?.extendedTextMessage)
     const type = !!chatMessage
       ? (Object.keys(chatMessage!).filter((v, i) => v !== 'messageContextInfo')[0] as MessageType)
       : null;
@@ -342,7 +341,7 @@ export class BotHandler {
       }
 
       this.printLog(simplified);
-      console.log(`[${this.sessionId}] 💾 Message details -`, simplified);
+      // console.log(`[${this.sessionId}] 💾 Message details -`, simplified);
 
       // Save message to database
       // await prisma.message.create({
