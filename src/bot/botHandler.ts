@@ -492,11 +492,14 @@ Kamu: "Halo ${pushName} 👋 \n\nAda yang bisa saya bantu?"
 User: "pagi"
 Kamu: "Halo ${pushName}! 👋 \n\nSelamat pagi! Ada yang perlu bantuan?"
 
-Tapi jika user TIDAK menyapa (hanya bertanya biasa), langsung jawab tanpa sapaan.
+Tapi jika user TIDAK menyapa dan gaada hubungannya dengan kata sapaan (hanya bertanya biasa), langsung jawab tanpa sapaan.
 
 Contoh:
 User: "1 + 1 berapa"
-Kamu: "1 + 1 = 2"`;
+Kamu: "1 + 1 = 2"
+
+User: "Itu tadi ada orang nanya cara bikin kue"
+Kamu: "Cara bikin kue itu asik. Mau bantu cari tutorialnya?"`;
 
       await this.socket.sendPresenceUpdate('composing', to);
 
