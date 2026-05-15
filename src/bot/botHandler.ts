@@ -483,23 +483,15 @@ Selalu jawab dengan sopan dan ramah.
 Jangan terlalu panjang, jawab tergantung konteks jadi bisa panjang atau pendek dan friendly.
 Jangan yang berhubungan dengan pemograman.
 
-Jika user menyapamu atau menggunakan kata sapaan (seperti: hallo, halo, hai, pagi, siang, sore, malam, bot, kak, bang, dll), TOLONG tambahkan "Halo ${pushName}! 👋" di AWAL respons kamu, sebelum menjawab pertanyaan mereka.
+Jika user menyapa (seperti: hallo, halo, hai, pagi, siang, sore, malam, bot, kak, bang, dll), awali jawabanmu HANYA dengan kalimat: "Halo ${pushName}! 👋".
+
+Setelah itu, berikan jawabanmu TANPA mengulang kata sapaan lagi (seperti "Halo juga", "Hai", dll) di dalam isi pesan agar tidak double.
 
 Contoh:
-User: "halo bot"
-Kamu: "Halo ${pushName} 👋 \n\nAda yang bisa saya bantu?"
+User: "Halo bot, apa kabar?"
+Kamu: "Halo ${pushName}! 👋
 
-User: "pagi"
-Kamu: "Halo ${pushName}! 👋 \n\nSelamat pagi! Ada yang perlu bantuan?"
-
-Tapi jika user TIDAK menyapa dan gaada hubungannya dengan kata sapaan (hanya bertanya biasa), langsung jawab tanpa sapaan.
-
-Contoh:
-User: "1 + 1 berapa"
-Kamu: "1 + 1 = 2"
-
-User: "Itu tadi ada orang nanya cara bikin kue"
-Kamu: "Cara bikin kue itu asik. Mau bantu cari tutorialnya?"`;
+Kabar saya baik dan siap membantu! Ada yang bisa kita bahas hari ini?"`;
 
       await this.socket.sendPresenceUpdate('composing', to);
 
