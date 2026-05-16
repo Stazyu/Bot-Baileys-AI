@@ -32,8 +32,8 @@ const evalCommand: CommandModule = {
             const send = (text: string) => sock.sendMessage(jid, { text });
             const reply = (text: string) => sock.sendMessage(jid, { text }, { quoted: context.message });
 
-            const fn = new Function('sock', 'm', 'jid', 'sender', 'isGroup', 'groupMetadata', 'send', 'reply', `return (async () => { ${code} })()`);
-            const result = await fn(sock, m, jid, senderJid, isGroup, groupMetadata, send, reply);
+            const fn = new Function('sock', 'm', 'jid', 'sender', 'isGroup', 'groupMetadata', 'send', 'reply', 'botNumber', `return (async () => { ${code} })()`);
+            const result = await fn(sock, m, jid, senderJid, isGroup, groupMetadata, send, reply, sock.user?.id?.split(':')[0] + '@s.whatsapp.net');
             const output = result !== undefined ? String(result) : 'undefined';
 
             await sock.sendMessage(jid, {
