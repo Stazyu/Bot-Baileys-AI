@@ -263,6 +263,7 @@ export class AIService {
       'poolside/laguna-m.1:free',
       'arcee-ai/trinity-large-thinking:free',
       'nvidia/nemotron-3-super-120b-a12b:free',
+      'openai/gpt-oss-120b:free'
     ];
   }
 }
