@@ -395,7 +395,9 @@ export class BotHandler {
       // Group auto-reply: respond when bot is tagged, greeted, or replied
       if (isGroup && !isCmd && from) {
 
-        const botNumberLid = "117351475355648@lid"
+        const botNumberLid = this.socket.user?.lid || ''
+        const tes = this.socket.user
+        console.log('Socker.user : ', tes)
         const isBotMentioned = (mentions || []).some((m: string) => m.includes(botNumberLid));
 
         let isReplyToBot = false;
