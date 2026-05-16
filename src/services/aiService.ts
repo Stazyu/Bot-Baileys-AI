@@ -23,7 +23,7 @@ export class AIService {
   constructor() {
     this.apiKey = process.env.OPENROUTER_API_KEY || '';
     this.model = process.env.OPENROUTER_MODEL || 'anthropic/claude-3-haiku';
-    
+
     if (!this.apiKey) {
       console.warn('⚠️ OPENROUTER_API_KEY is not set. AI features will be disabled.');
     }
@@ -141,7 +141,7 @@ export class AIService {
           if (resolved) return;
           resolved = true;
           clearTimeout(timeoutId);
-          
+
           if (content || !isError) {
             if (content) {
               messages.push({ role: 'assistant', content });
@@ -163,11 +163,11 @@ export class AIService {
 
         stream.on('data', (chunk: Buffer) => {
           const lines = chunk.toString().split('\n');
-          
+
           for (const line of lines) {
             if (line.startsWith('data: ')) {
               const data = line.slice(6);
-              
+
               if (data === '[DONE]') {
                 if (onChunk) onChunk({ content: '', done: true });
                 finish(fullContent);
@@ -177,7 +177,7 @@ export class AIService {
               try {
                 const parsed = JSON.parse(data);
                 const content = parsed.choices?.[0]?.delta?.content;
-                
+
                 if (content) {
                   fullContent += content;
                   buffer += content;
@@ -256,13 +256,13 @@ export class AIService {
 
   static getAvailableModels(): string[] {
     return [
-      'anthropic/claude-3-haiku',
-      'anthropic/claude-3-sonnet',
-      'openai/gpt-4o-mini',
-      'openai/gpt-4o',
-      'google/gemini-pro',
-      'meta-llama/llama-3-8b-instruct',
-      'mistralai/mistral-7b-instruct',
+      'qwen/qwen3-next-80b-a3b-instruct:free',
+      'openrouter/owl-alpha',
+      'baidu/cobuddy:free',
+      'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+      'poolside/laguna-m.1:free',
+      'arcee-ai/trinity-large-thinking:free',
+      'nvidia/nemotron-3-super-120b-a12b:free',
     ];
   }
 }
