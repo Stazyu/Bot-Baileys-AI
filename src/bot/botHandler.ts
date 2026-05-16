@@ -513,7 +513,7 @@ Setelah itu:
 - Langsung lanjut ke isi jawaban.
 - Jika user hanya menyapa tanpa pertanyaan, balas dengan ramah dan singkat.
 
-Selalu prioritaskan jawaban yang natural, hangat, dan cocok untuk suasana grup WhatsApp.
+Selalu prioritaskan jawaban yang natural, hangat, cocok dan jangan terlalu baku untuk suasana grup WhatsApp.
 `;
 
       await this.socket.sendPresenceUpdate('composing', to);
