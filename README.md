@@ -1,6 +1,6 @@
 # Bot-Baileys-AI
 
-Multi-session WhatsApp bot with plugin architecture, media download capabilities, and PostgreSQL database using Prisma ORM.
+Multi-session WhatsApp bot with plugin architecture, media download capabilities, and MongoDB database using Prisma ORM.
 
 ## Features
 
@@ -8,7 +8,7 @@ Multi-session WhatsApp bot with plugin architecture, media download capabilities
 - ✅ **Plugin architecture**: Modular command system with category-based organization
 - ✅ **Media downloads**: Download content from Instagram, TikTok, YouTube
 - ✅ **Sticker creation**: Convert images/videos to WhatsApp stickers
-- ✅ **PostgreSQL database**: Store session data using Prisma ORM
+- ✅ **MongoDB database**: Store session data using Prisma ORM
 - ✅ **Auto-reconnection**: Automatically reconnect when connection is lost
 - ✅ **Session management**: Create, list, and disconnect sessions via commands
 - ✅ **TypeScript**: Fully typed with TypeScript for better development experience
@@ -17,7 +17,7 @@ Multi-session WhatsApp bot with plugin architecture, media download capabilities
 ## Prerequisites
 
 - Node.js (v18 or higher)
-- PostgreSQL database
+- MongoDB database
 - pnpm (recommended) or npm/yarn
 
 ## Installation
@@ -38,9 +38,9 @@ Multi-session WhatsApp bot with plugin architecture, media download capabilities
    cp .env.example .env
    ```
    
-   Edit `.env` and set your PostgreSQL connection string:
+   Edit `.env` and set your MongoDB connection string:
    ```
-   DATABASE_URL="postgresql://username:password@localhost:5432/bot_baileys?schema=public"
+   DATABASE_URL="mongodb://username:password@localhost:27017/bot_baileys?authSource=admin"
    ```
 
 4. **Set up the database**
@@ -181,7 +181,7 @@ pnpm prisma:studio
 ## Technology Stack
 
 - **Baileys**: WhatsApp Web API library (modified fork with button support)
-- **Prisma**: Type-safe ORM for PostgreSQL
+- **Prisma**: Type-safe ORM for MongoDB
 - **TypeScript**: Type-safe JavaScript
 - **pino**: Fast JSON logger
 - **nexo-aio-downloader**: All-in-one media downloader
@@ -192,9 +192,9 @@ pnpm prisma:studio
 ## Troubleshooting
 
 ### Connection issues
-- Make sure your PostgreSQL database is running
+- Make sure your MongoDB database is running
 - Check your DATABASE_URL in `.env`
-- Ensure your firewall allows PostgreSQL connections
+- Ensure your firewall allows MongoDB connections
 
 ### Session not connecting
 - Use `--force-clear` flag to reset the session
@@ -214,7 +214,7 @@ pnpm prisma:studio
 ### Database errors
 - Run `pnpm prisma:migrate` to ensure schema is up to date
 - Check database permissions
-- Verify PostgreSQL is running
+- Verify MongoDB is running
 
 ## License
 

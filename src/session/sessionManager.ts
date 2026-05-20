@@ -292,7 +292,7 @@ export class SessionManager {
     try {
       await prisma.session.update({
         where: { sessionId },
-        data: { isActive: false, authData: Prisma.JsonNull },
+        data: { isActive: false, authData: null },
       });
     } catch (error) {
       log.error(`Error deleting session ${sessionId} from DB:`, error as object);
@@ -303,7 +303,7 @@ export class SessionManager {
     try {
       // Load sessions that have authData, regardless of isActive status
       const sessions = await prisma.session.findMany({
-        where: { authData: { not: Prisma.JsonNull } },
+        where: { authData: { not: null } },
       });
 
       for (const session of sessions) {

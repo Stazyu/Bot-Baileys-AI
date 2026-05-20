@@ -24,7 +24,7 @@ RUN pnpm rebuild sharp youtube-dl-exec
 # Copy source
 COPY . .
 
-ENV DATABASE_URL="postgresql://user:password@localhost:5432/db?schema=public"
+ENV DATABASE_URL="mongodb://localhost:27017/db"
 
 # Prisma generate (build-time only)
 RUN npx prisma generate

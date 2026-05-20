@@ -29,7 +29,7 @@ export async function useMultiFileAuthStateDB(
     log.info(`Force clearing auth data for session ${sessionId}`);
     await prisma.session.update({
       where: { sessionId },
-      data: { authData: Prisma.JsonNull },
+      data: { authData: null },
     }).catch(() => {
       // Session might not exist, that's ok
     });
