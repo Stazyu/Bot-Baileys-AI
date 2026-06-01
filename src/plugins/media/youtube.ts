@@ -73,7 +73,12 @@ const downloadMedia = async (context: CommandContext, url: string, format: 'vide
     downloadOptions.audioFormat = 'mp3';
     downloadOptions.audioQuality = 0;
   } else {
-    downloadOptions.format = `best[height<=${quality === 'best' ? '9999' : quality.replace('p', '')}]`;
+    if (quality === 'best') {
+      downloadOptions.format = 'bestvideo+bestaudio/best';
+    } else {
+      const maxHeight = quality.replace('p', '');
+      downloadOptions.format = `bestvideo[height<=${maxHeight}]+bestaudio/best[height<=${maxHeight}]`;
+    }
     downloadOptions.mergeOutputFormat = 'mp4';
   }
 
@@ -84,7 +89,8 @@ const downloadMedia = async (context: CommandContext, url: string, format: 'vide
     throw new Error('Failed to download media');
   }
 
-  const filePath = path.join(tempDir, output._filename);
+  const filePathOriginal = path.join(tempDir, output._filename);
+  const filePath = format === 'audio' ? path.join(tempDir, output._filename.replace(/\.[^/.]+$/, '.mp3')) : filePathOriginal;
   const fileStats = await fs.stat(filePath);
 
   if (fileStats.size > 50 * 1024 * 1024) {
@@ -113,7 +119,6 @@ Size: ${(fileStats.size / 1024 / 1024).toFixed(2)}MB
   if (format === 'audio') {
     await context.socket.sendMessage(context.fromJid, {
       audio: { url: filePath },
-      caption,
       mimetype: 'audio/mpeg',
     });
   } else {
@@ -177,7 +182,7 @@ const youtubeCommand: CommandModule = {
           defaultSearch: 'ytsearch1',
         };
 
-        const output = await youtubeDl(`ytsearch1:${query}`, searchOptions, { cwd: tempDir }) as YoutubeDlOutput;
+        const output = await youtubeDl(query, searchOptions, { cwd: tempDir }) as YoutubeDlOutput;
 
         if (!output || !output.title) {
           await context.socket.sendMessage(context.fromJid, {

@@ -80,7 +80,12 @@ async function downloadYouTubeMedia(context: CommandContext, url: string, format
     downloadOptions.audioFormat = 'mp3';
     downloadOptions.audioQuality = 0;
   } else {
-    downloadOptions.format = `best[height<=${quality === 'best' ? '9999' : quality.replace('p', '')}]`;
+    if (quality === 'best') {
+      downloadOptions.format = 'bestvideo+bestaudio/best';
+    } else {
+      const maxHeight = quality.replace('p', '');
+      downloadOptions.format = `bestvideo[height<=${maxHeight}]+bestaudio/best[height<=${maxHeight}]`;
+    }
     downloadOptions.mergeOutputFormat = 'mp4';
   }
 
