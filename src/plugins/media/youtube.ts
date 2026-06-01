@@ -11,7 +11,30 @@ interface YoutubeDlOutput {
   view_count?: number;
   upload_date?: string;
   description?: string;
+  webpage_url?: string;
 }
+
+const formatDuration = (seconds?: number): string => {
+  if (!seconds) return 'N/A';
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+};
+
+const formatViews = (views?: number): string => {
+  if (!views) return 'N/A';
+  if (views >= 1000000) return `${(views / 1000000).toFixed(1)}M`;
+  if (views >= 1000) return `${(views / 1000).toFixed(1)}K`;
+  return views.toString();
+};
+
+const formatUploadDate = (date?: string): string => {
+  if (!date) return 'N/A';
+  const year = date.substring(0, 4);
+  const month = date.substring(4, 6);
+  const day = date.substring(6, 8);
+  return `${day}-${month}-${year}`;
+};
 
 interface YtDlOptions {
   cwd: string;
@@ -70,28 +93,6 @@ const downloadMedia = async (context: CommandContext, url: string, format: 'vide
     });
   }
 
-  const formatDuration = (seconds?: number): string => {
-    if (!seconds) return 'N/A';
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const formatViews = (views?: number): string => {
-    if (!views) return 'N/A';
-    if (views >= 1000000) return `${(views / 1000000).toFixed(1)}M`;
-    if (views >= 1000) return `${(views / 1000).toFixed(1)}K`;
-    return views.toString();
-  };
-
-  const formatUploadDate = (date?: string): string => {
-    if (!date) return 'N/A';
-    const year = date.substring(0, 4);
-    const month = date.substring(4, 6);
-    const day = date.substring(6, 8);
-    return `${day}-${month}-${year}`;
-  };
-
   const processingTimeMs = Date.now() - startTime;
   const processingTime = processingTimeMs < 1000
     ? `${processingTimeMs}ms`
@@ -135,23 +136,76 @@ Size: ${(fileStats.size / 1024 / 1024).toFixed(2)}MB
 const youtubeCommand: CommandModule = {
   config: {
     name: 'youtube',
-    aliases: ['yt', 'ytdl'],
-    description: 'Download video or audio from YouTube with multiple quality options',
-    usage: '!youtube <youtube-url> [format] [quality]\nExample: !youtube https://youtube.com/watch?v=xxx video 720p\nExample: !youtube https://youtube.com/watch?v=xxx audio\nExample: !youtube https://youtube.com/watch?v=xxx (shows buttons)',
+    aliases: ['yt', 'ytdl', 'play'],
+    description: 'Download video/audio from YouTube or play music by song name',
+    usage: '!youtube <youtube-url> [format] [quality]\n!play <song name>\nExample: !youtube https://youtube.com/watch?v=xxx audio\nExample: !play shape of you',
     category: 'media',
   },
   handler: async function (context, args: string[]): Promise<void> {
 
-    const url = args[0];
+    const firstArg = args[0];
     const format = (args[1] || 'video') as 'video' | 'audio';
     const quality = args[2] || 'best';
 
-    if (!url) {
+    if (!firstArg) {
       await context.socket.sendMessage(context.fromJid, {
-        text: '❌ Please provide a YouTube URL.\n\nUsage: !youtube <youtube-url> [format] [quality]\nExample: !youtube https://youtube.com/watch?v=xxx video 720p\nExample: !youtube https://youtube.com/watch?v=xxx audio\nExample: !youtube https://youtube.com/watch?v=xxx (shows buttons)',
+        text: '❌ Please provide a YouTube URL or song name.\n\nUsage: !youtube <youtube-url> [format] [quality]\n       !play <song name>\n\nExample: !youtube https://youtube.com/watch?v=xxx audio\nExample: !play shape of you',
       });
       return;
     }
+
+    // Detect if first arg is a URL or a search query
+    const isUrl = /^https?:\/\//i.test(firstArg);
+
+    if (!isUrl) {
+      // Search mode: treat input as song name, search and play audio
+      const query = args.join(' ');
+      try {
+        await context.socket.sendMessage(context.fromJid, {
+          text: `🔍 Searching for "${query}"...`,
+        });
+
+        const tempDir = path.join(process.cwd(), 'temp');
+        await fs.mkdir(tempDir, { recursive: true });
+
+        const searchOptions: Flags = {
+          noWarnings: true,
+          callHome: false,
+          noCheckCertificates: true,
+          preferFreeFormats: true,
+          printJson: true,
+          defaultSearch: 'ytsearch1',
+        };
+
+        const output = await youtubeDl(`ytsearch1:${query}`, searchOptions, { cwd: tempDir }) as YoutubeDlOutput;
+
+        if (!output || !output.title) {
+          await context.socket.sendMessage(context.fromJid, {
+            text: '❌ No results found for your search query.',
+          });
+          return;
+        }
+
+        await context.socket.sendMessage(context.fromJid, {
+          text: `🎵 Found: ${output.title}\n👤 ${output.uploader || 'Unknown'}\n⏱️ ${formatDuration(output.duration)}\n\n🔄 Downloading audio...`,
+        });
+
+        const videoUrl = output.webpage_url || `ytsearch:${query}`;
+        if (output.duration && output.duration <= 60) {
+          await downloadMedia(context, videoUrl, 'video', 'best');
+        } else {
+          await downloadMedia(context, videoUrl, 'audio', 'best');
+        }
+      } catch (error: unknown) {
+        console.error('YouTube search error:', error);
+        await context.socket.sendMessage(context.fromJid, {
+          text: '❌ Failed to search for the song. Please try again with a different query.',
+        });
+      }
+      return;
+    }
+
+    const url = firstArg;
 
     // If only URL is provided, check if it's a short video first
     if (args.length === 1) {
@@ -180,20 +234,6 @@ const youtubeCommand: CommandModule = {
           await downloadMedia(context, url, 'video', 'best');
           return;
         }
-
-        const formatDuration = (seconds?: number): string => {
-          if (!seconds) return 'N/A';
-          const mins = Math.floor(seconds / 60);
-          const secs = seconds % 60;
-          return `${mins}:${secs.toString().padStart(2, '0')}`;
-        };
-
-        const formatViews = (views?: number): string => {
-          if (!views) return 'N/A';
-          if (views >= 1000000) return `${(views / 1000000).toFixed(1)}M`;
-          if (views >= 1000) return `${(views / 1000).toFixed(1)}K`;
-          return views.toString();
-        };
 
         const caption = `🎥 Choose download option for:
 
