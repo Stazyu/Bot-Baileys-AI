@@ -118,7 +118,6 @@ const downloadMedia = async (context: CommandContext, url: string, format: 'vide
   }
 
   const output = await youtubeDl(url, downloadOptions, { cwd: tempDir }) as YoutubeDlOutput;
-  console.log(output);
 
   if (!output || !output._filename) {
     throw new Error('Failed to download media');
