@@ -30,8 +30,8 @@ importers:
         specifier: ^1.2.0
         version: 1.2.0
       dotenv:
-        specifier: ^17.4.1
-        version: 17.4.1
+        specifier: ^17.4.2
+        version: 17.4.2
       link-preview-js:
         specifier: ^3.0.0
         version: 3.0.0
@@ -60,8 +60,8 @@ importers:
         specifier: ^4.4.4
         version: 4.4.4
       youtube-dl-exec:
-        specifier: ^3.1.6
-        version: 3.1.6
+        specifier: ^3.1.7
+        version: 3.1.7
     devDependencies:
       '@types/node':
         specifier: ^22.7.5
@@ -1224,8 +1224,8 @@ packages:
     resolution: {integrity: sha512-uBq4egWHTcTt33a72vpSG0z3HnPuIl6NqYcTrKEg2azoEyl2hpW0zqlxysq2pK9HlDIHyHyakeYaYnSAwd8bow==}
     engines: {node: '>=12'}
 
-  dotenv@17.4.1:
-    resolution: {integrity: sha512-k8DaKGP6r1G30Lx8V4+pCsLzKr8vLmV2paqEj1Y55GdAgJuIqpRp5FfajGF8KtwMxCz9qJc6wUIJnm053d/WCw==}
+  dotenv@17.4.2:
+    resolution: {integrity: sha512-nI4U3TottKAcAD9LLud4Cb7b2QztQMUEfHbvhTH09bqXTxnSie8WnjPALV/WMCrJZ6UV/qHJ6L03OqO3LcdYZw==}
     engines: {node: '>=12'}
 
   dunder-proto@1.0.1:
@@ -3135,8 +3135,8 @@ packages:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
 
-  youtube-dl-exec@3.1.6:
-    resolution: {integrity: sha512-3rYc8jQZHbZAUZ21WCcFlZvWGHiatS2Bo/6vyVOxIcM9q9b8pkjZoPxL8wMDl6OqvPMx5Q+BdJbUIN0pYIYZ+g==}
+  youtube-dl-exec@3.1.7:
+    resolution: {integrity: sha512-NlbHVcnoj1qmnHe2OFAh7zsZT4+pC2RdvWLiGgHWI9Jef+EIFzG3uUh32G745l3arxAnGsVEKyODEJClTwf5Kw==}
     engines: {node: '>= 18'}
 
 snapshots:
@@ -4311,7 +4311,7 @@ snapshots:
 
   dotenv@16.6.1: {}
 
-  dotenv@17.4.1: {}
+  dotenv@17.4.2: {}
 
   dunder-proto@1.0.1:
     dependencies:
@@ -5401,7 +5401,7 @@ snapshots:
       tough-cookie: 5.1.2
       unzipper: 0.12.3
     optionalDependencies:
-      youtube-dl-exec: 3.1.6
+      youtube-dl-exec: 3.1.7
     transitivePeerDependencies:
       - debug
       - encoding
@@ -6598,7 +6598,7 @@ snapshots:
 
   yocto-queue@0.1.0: {}
 
-  youtube-dl-exec@3.1.6:
+  youtube-dl-exec@3.1.7:
     dependencies:
       binary-version-check: 6.1.0
       dargs: 7.0.0
