@@ -28,6 +28,41 @@ const formatViews = (views?: number): string => {
   return views.toString();
 };
 
+const createButtonMessage = (caption: string, videoUrl: string) => ({
+  text: caption,
+  footer: 'YouTube Downloader',
+  interactiveButtons: [
+    {
+      name: 'quick_reply',
+      buttonParamsJson: JSON.stringify({
+        display_text: '🎵 Audio',
+        id: `yt_audio_${Buffer.from(videoUrl).toString('base64')}`
+      })
+    },
+    {
+      name: 'quick_reply',
+      buttonParamsJson: JSON.stringify({
+        display_text: '📹 360p',
+        id: `yt_360p_${Buffer.from(videoUrl).toString('base64')}`
+      })
+    },
+    {
+      name: 'quick_reply',
+      buttonParamsJson: JSON.stringify({
+        display_text: '📹 720p',
+        id: `yt_720p_${Buffer.from(videoUrl).toString('base64')}`
+      })
+    },
+    {
+      name: 'quick_reply',
+      buttonParamsJson: JSON.stringify({
+        display_text: '📹 Best Quality',
+        id: `yt_best_${Buffer.from(videoUrl).toString('base64')}`
+      })
+    }
+  ]
+});
+
 const formatUploadDate = (date?: string): string => {
   if (!date) return 'N/A';
   const year = date.substring(0, 4);
@@ -163,7 +198,7 @@ const youtubeCommand: CommandModule = {
     const isUrl = /^https?:\/\//i.test(firstArg);
 
     if (!isUrl) {
-      // Search mode: treat input as song name, search and play audio
+      // Search mode: treat input as song name, show buttons to choose quality
       const query = args.join(' ');
       try {
         await context.socket.sendMessage(context.fromJid, {
@@ -191,16 +226,24 @@ const youtubeCommand: CommandModule = {
           return;
         }
 
-        await context.socket.sendMessage(context.fromJid, {
-          text: `🎵 Found: ${output.title}\n👤 ${output.uploader || 'Unknown'}\n⏱️ ${formatDuration(output.duration)}\n\n🔄 Downloading audio...`,
-        });
-
-        const videoUrl = output.webpage_url || `ytsearch:${query}`;
-        if (output.duration && output.duration <= 60) {
-          await downloadMedia(context, videoUrl, 'video', 'best');
-        } else {
-          await downloadMedia(context, videoUrl, 'audio', 'best');
+        const videoUrl = output.webpage_url;
+        if (!videoUrl) {
+          await context.socket.sendMessage(context.fromJid, {
+            text: '❌ Failed to get video URL from search results.',
+          });
+          return;
         }
+
+        const caption = `🎥 Choose download option for:
+
+📌 ${output.title || 'Unknown Title'}
+👤 ${output.uploader || 'Unknown Channel'}
+⏱️ ${formatDuration(output.duration)}
+👁️ ${formatViews(output.view_count)} views
+📅 ${formatUploadDate(output.upload_date)}`;
+
+        await context.socket.sendMessage(context.fromJid, createButtonMessage(caption, videoUrl));
+
       } catch (error: unknown) {
         console.error('YouTube search error:', error);
         await context.socket.sendMessage(context.fromJid, {
@@ -246,44 +289,9 @@ const youtubeCommand: CommandModule = {
 👤 ${output.uploader || 'Unknown Channel'}
 ⏱️ ${formatDuration(output.duration)}
 👁️ ${formatViews(output.view_count)} views
-📅 ${output.upload_date}`;
+📅 ${formatUploadDate(output.upload_date)}`;
 
-        const buttonMessage = {
-          text: caption,
-          footer: 'YouTube Downloader',
-          interactiveButtons: [
-            {
-              name: 'quick_reply',
-              buttonParamsJson: JSON.stringify({
-                display_text: '🎵 Audio',
-                id: `yt_audio_${Buffer.from(url).toString('base64')}`
-              })
-            },
-            {
-              name: 'quick_reply',
-              buttonParamsJson: JSON.stringify({
-                display_text: '📹 360p',
-                id: `yt_360p_${Buffer.from(url).toString('base64')}`
-              })
-            },
-            {
-              name: 'quick_reply',
-              buttonParamsJson: JSON.stringify({
-                display_text: '📹 720p',
-                id: `yt_720p_${Buffer.from(url).toString('base64')}`
-              })
-            },
-            {
-              name: 'quick_reply',
-              buttonParamsJson: JSON.stringify({
-                display_text: '📹 Best Quality',
-                id: `yt_best_${Buffer.from(url).toString('base64')}`
-              })
-            }
-          ]
-        };
-
-        await context.socket.sendMessage(context.fromJid, buttonMessage);
+        await context.socket.sendMessage(context.fromJid, createButtonMessage(caption, url));
 
       } catch (error) {
         console.error('Error getting video info:', error);
