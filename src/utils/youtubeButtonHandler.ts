@@ -4,6 +4,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 
 interface YoutubeDlOutput {
+  id?: string;
   _filename?: string;
   title?: string;
   uploader?: string;
@@ -66,44 +67,55 @@ async function downloadYouTubeMedia(context: CommandContext, url: string, format
   const tempDir = path.join(process.cwd(), 'temp');
   await fs.mkdir(tempDir, { recursive: true });
 
-  const downloadOptions: Flags = {
+  // Step 1: Get video info first (no download)
+  const infoOptions: Flags = {
     noWarnings: true,
     callHome: false,
     noCheckCertificates: true,
     preferFreeFormats: true,
-    printJson: true,
-    verbose: true,
+    dumpJson: true,
+  };
+
+  const info = await youtubeDl(url, infoOptions, { cwd: tempDir }) as YoutubeDlOutput;
+
+  if (!info || !info.title) {
+    throw new Error('Failed to get video info');
+  }
+
+  // Step 2: Download with specific format
+  const downloadFlags: Flags = {
+    noWarnings: true,
+    callHome: false,
+    noCheckCertificates: true,
+    preferFreeFormats: true,
+    output: path.join(tempDir, `${info.id || 'video'}.%(ext)s`),
   };
 
   if (format === 'audio') {
-    downloadOptions.extractAudio = true;
-    downloadOptions.audioFormat = 'mp3';
-    downloadOptions.audioQuality = 0;
+    downloadFlags.extractAudio = true;
+    downloadFlags.audioFormat = 'mp3';
+    downloadFlags.audioQuality = 0;
   } else {
     if (quality === 'best') {
-      downloadOptions.format = 'bestvideo+bestaudio/best';
+      downloadFlags.format = 'bestvideo+bestaudio/best';
     } else {
       const maxHeight = quality.replace('p', '');
-      downloadOptions.format = `bestvideo[height<=${maxHeight}]+bestaudio/best[height<=${maxHeight}]`;
+      downloadFlags.format = `bestvideo[height<=${maxHeight}]+bestaudio/best[height<=${maxHeight}]`;
     }
-    downloadOptions.mergeOutputFormat = 'mp4';
+    downloadFlags.mergeOutputFormat = 'mp4';
   }
 
-  const output = await youtubeDl(url, downloadOptions, { cwd: tempDir }) as YoutubeDlOutput;
+  await youtubeDl(url, downloadFlags, { cwd: tempDir });
 
-  if (!output || !output._filename) {
-    throw new Error('Failed to download media');
-  }
-
-  const filePath = path.join(tempDir, output._filename);
-  const filePathMp3 = path.join(tempDir, output._filename.replace(/\.[^/.]+$/, '.mp3'));
-  const fileStats = await fs.stat(format === 'audio' ? filePathMp3 : filePath);
+  const ext = format === 'audio' ? 'mp3' : 'mp4';
+  const filePath = path.join(tempDir, `${info.id || 'video'}.${ext}`);
+  const fileStats = await fs.stat(filePath);
 
   if (fileStats.size > 50 * 1024 * 1024) {
     await context.socket.sendMessage(context.fromJid, {
       text: `⚠️ File size is ${(fileStats.size / 1024 / 1024).toFixed(2)}MB. WhatsApp has a 100MB limit for media files.`,
     });
-    await fs.unlink(format === 'audio' ? filePathMp3 : filePath);
+    await fs.unlink(filePath);
     return;
   }
 
@@ -136,11 +148,11 @@ async function downloadYouTubeMedia(context: CommandContext, url: string, format
 
   const caption = `🎥 ${format === 'audio' ? 'Audio' : 'Video'} downloaded successfully!
 
-📌 ${output.title || 'Unknown Title'}
-👤 ${output.uploader || 'Unknown Channel'}
-⏱️ ${formatDuration(output.duration)}
-👁️ ${formatViews(output.view_count)} views
-📅 ${formatUploadDate(output.upload_date)}
+📌 ${info.title || 'Unknown Title'}
+👤 ${info.uploader || 'Unknown Channel'}
+⏱️ ${formatDuration(info.duration)}
+👁️ ${formatViews(info.view_count)} views
+📅 ${formatUploadDate(info.upload_date)}
 
 Quality: ${quality}
 Size: ${(fileStats.size / 1024 / 1024).toFixed(2)}MB
@@ -148,7 +160,7 @@ Size: ${(fileStats.size / 1024 / 1024).toFixed(2)}MB
 
   if (format === 'audio') {
     await context.socket.sendMessage(context.fromJid, {
-      audio: { url: filePathMp3 },
+      audio: { url: filePath },
       mimetype: 'audio/mpeg',
     });
   } else {
@@ -161,7 +173,7 @@ Size: ${(fileStats.size / 1024 / 1024).toFixed(2)}MB
 
   setTimeout(async () => {
     try {
-      await fs.unlink(format === 'audio' ? filePathMp3 : filePath);
+      await fs.unlink(filePath);
     } catch (error) {
       console.error('Failed to cleanup file:', error);
     }
