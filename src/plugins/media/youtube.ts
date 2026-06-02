@@ -142,10 +142,14 @@ const downloadMedia = async (context: CommandContext, url: string, format: 'vide
   const filePath = path.join(tempDir, `${info.id || 'video'}.${ext}`);
   const fileStats = await fs.stat(filePath);
 
-  if (fileStats.size > 50 * 1024 * 1024) {
+  const sizeLimit = asDocument ? 2000 * 1024 * 1024 : 50 * 1024 * 1024;
+  if (fileStats.size > sizeLimit) {
+    const limitMb = asDocument ? 2000 : 50;
     await context.socket.sendMessage(context.fromJid, {
-      text: `⚠️ File size is ${(fileStats.size / 1024 / 1024).toFixed(2)}MB. WhatsApp has a 100MB limit for media files.`,
+      text: `⚠️ File size is ${(fileStats.size / 1024 / 1024).toFixed(2)}MB. Limit is ${limitMb}MB.`,
     });
+    await fs.unlink(filePath);
+    return;
   }
 
   const processingTimeMs = Date.now() - startTime;
