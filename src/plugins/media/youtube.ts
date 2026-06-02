@@ -242,6 +242,8 @@ const youtubeCommand: CommandModule = {
           noCheckCertificates: true,
           preferFreeFormats: true,
           printJson: true,
+          simulate: true,
+          skipDownload: true,
           defaultSearch: 'ytsearch1',
         };
 
