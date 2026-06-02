@@ -134,6 +134,7 @@ export class BotHandler {
     const isButtonResponseMessage = type === 'buttonsResponseMessage';
     const isTemplateButtonReplyMessage = type === 'templateButtonReplyMessage';
     const isListResponseMessage = type === 'listResponseMessage';
+    const isInteractiveResponseMessage = type === 'interactiveResponseMessage';
     const isQuotedAudio = type === 'extendedTextMessage' && quotedMessageType === 'audioMessage';
     const isQuotedImage = type === 'extendedTextMessage' && quotedMessageType === 'imageMessage';
     const isQuotedVideo = type === 'extendedTextMessage' && quotedMessageType === 'videoMessage';
@@ -163,6 +164,19 @@ export class BotHandler {
         }
       }
     }
+    const getInteractiveButtonId = () => {
+      const paramsJson = msg?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+      if (paramsJson) {
+        try {
+          const parsed = JSON.parse(paramsJson);
+          return parsed.id;
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    };
+
     const message_button =
       type === 'buttonsResponseMessage'
         ? msg?.message?.buttonsResponseMessage?.selectedButtonId
@@ -172,7 +186,9 @@ export class BotHandler {
             ? msg?.message?.templateButtonReplyMessage?.selectedId
             : type === 'listResponseMessage'
               ? msg?.message?.listResponseMessage?.singleSelectReply?.selectedRowId
-              : null;
+              : type === 'interactiveResponseMessage'
+                ? getInteractiveButtonId()
+                : null;
     let message =
       type === 'conversation'
         ? msg?.message?.conversation
@@ -231,6 +247,7 @@ export class BotHandler {
       isButtonResponseMessage,
       isTemplateButtonReplyMessage,
       isListResponseMessage,
+      isInteractiveResponseMessage,
       isQuotedAudio,
       isQuotedImage,
       isQuotedVideo,
@@ -428,7 +445,12 @@ export class BotHandler {
         }
       }
 
-      if (simplified.isTemplateButtonReplyMessage && simplified.message_button) {
+      const isButtonReply =
+        simplified.isTemplateButtonReplyMessage ||
+        simplified.isButtonResponseMessage ||
+        simplified.isInteractiveResponseMessage;
+
+      if (isButtonReply && simplified.message_button) {
         const context = {
           socket: this.socket,
           sessionId: this.sessionId,
