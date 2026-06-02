@@ -29,40 +29,43 @@ const formatViews = (views?: number): string => {
   return views.toString();
 };
 
-const createButtonMessage = (caption: string, videoUrl: string) => ({
-  text: caption,
-  footer: 'YouTube Downloader',
-  interactiveButtons: [
-    {
-      name: 'quick_reply',
-      buttonParamsJson: JSON.stringify({
-        display_text: '🎵 Audio',
-        id: `yt_audio_${Buffer.from(videoUrl).toString('base64')}`
-      })
-    },
-    {
-      name: 'quick_reply',
-      buttonParamsJson: JSON.stringify({
-        display_text: '📹 360p',
-        id: `yt_360p_${Buffer.from(videoUrl).toString('base64')}`
-      })
-    },
-    {
-      name: 'quick_reply',
-      buttonParamsJson: JSON.stringify({
-        display_text: '📹 720p',
-        id: `yt_720p_${Buffer.from(videoUrl).toString('base64')}`
-      })
-    },
-    {
-      name: 'quick_reply',
-      buttonParamsJson: JSON.stringify({
-        display_text: '📹 Best Quality',
-        id: `yt_best_${Buffer.from(videoUrl).toString('base64')}`
-      })
-    }
-  ]
-});
+const createButtonMessage = (caption: string, videoUrl: string, asDocument: boolean = false) => {
+  const prefix = asDocument ? 'ytdoc' : 'yt';
+  return {
+    text: caption,
+    footer: 'YouTube Downloader',
+    interactiveButtons: [
+      {
+        name: 'quick_reply',
+        buttonParamsJson: JSON.stringify({
+          display_text: '🎵 Audio',
+          id: `${prefix}_audio_${Buffer.from(videoUrl).toString('base64')}`
+        })
+      },
+      {
+        name: 'quick_reply',
+        buttonParamsJson: JSON.stringify({
+          display_text: '📹 360p',
+          id: `${prefix}_360p_${Buffer.from(videoUrl).toString('base64')}`
+        })
+      },
+      {
+        name: 'quick_reply',
+        buttonParamsJson: JSON.stringify({
+          display_text: '📹 720p',
+          id: `${prefix}_720p_${Buffer.from(videoUrl).toString('base64')}`
+        })
+      },
+      {
+        name: 'quick_reply',
+        buttonParamsJson: JSON.stringify({
+          display_text: '📹 Best Quality',
+          id: `${prefix}_best_${Buffer.from(videoUrl).toString('base64')}`
+        })
+      }
+    ]
+  };
+};
 
 const formatUploadDate = (date?: string): string => {
   if (!date) return 'N/A';
@@ -85,7 +88,7 @@ interface YtDlOptions {
   mergeOutputFormat?: string;
 }
 
-const downloadMedia = async (context: CommandContext, url: string, format: 'video' | 'audio', quality: string): Promise<void> => {
+const downloadMedia = async (context: CommandContext, url: string, format: 'video' | 'audio', quality: string, asDocument: boolean = false): Promise<void> => {
   const startTime = Date.now();
 
   await context.socket.sendMessage(context.fromJid, {
@@ -139,10 +142,14 @@ const downloadMedia = async (context: CommandContext, url: string, format: 'vide
   const filePath = path.join(tempDir, `${info.id || 'video'}.${ext}`);
   const fileStats = await fs.stat(filePath);
 
-  if (fileStats.size > 50 * 1024 * 1024) {
+  const sizeLimit = asDocument ? 2000 * 1024 * 1024 : 50 * 1024 * 1024;
+  if (fileStats.size > sizeLimit) {
+    const limitMb = asDocument ? 2000 : 50;
     await context.socket.sendMessage(context.fromJid, {
-      text: `⚠️ File size is ${(fileStats.size / 1024 / 1024).toFixed(2)}MB. WhatsApp has a 100MB limit for media files.`,
+      text: `⚠️ File size is ${(fileStats.size / 1024 / 1024).toFixed(2)}MB. Limit is ${limitMb}MB.`,
     });
+    await fs.unlink(filePath);
+    return;
   }
 
   const processingTimeMs = Date.now() - startTime;
@@ -162,7 +169,14 @@ Quality: ${quality}
 Size: ${(fileStats.size / 1024 / 1024).toFixed(2)}MB
 ⚡ Processing time: ${processingTime}`;
 
-  if (format === 'audio') {
+  if (asDocument) {
+    await context.socket.sendMessage(context.fromJid, {
+      document: { url: filePath },
+      mimetype: format === 'audio' ? 'audio/mpeg' : 'video/mp4',
+      fileName: `${info.title || 'video'}.${ext}`,
+      caption,
+    });
+  } else if (format === 'audio') {
     await context.socket.sendMessage(context.fromJid, {
       audio: { url: filePath },
       mimetype: 'audio/mpeg',
@@ -189,18 +203,21 @@ const youtubeCommand: CommandModule = {
     name: 'youtube',
     aliases: ['yt', 'ytdl', 'play'],
     description: 'Download video/audio from YouTube or play music by song name',
-    usage: '!youtube <youtube-url> [format] [quality]\n!play <song name>\nExample: !youtube https://youtube.com/watch?v=xxx audio\nExample: !play shape of you',
+    usage: '!youtube <youtube-url> [format] [quality] [--doc]\n!play <song name> [--doc]\nExample: !youtube https://youtube.com/watch?v=xxx audio --doc\nExample: !play shape of you --doc',
     category: 'media',
   },
   handler: async function (context, args: string[]): Promise<void> {
 
-    const firstArg = args[0];
-    const format = (args[1] || 'video') as 'video' | 'audio';
-    const quality = args[2] || 'best';
+    const asDocument = args.includes('--doc');
+    const filteredArgs = args.filter(arg => arg !== '--doc');
+
+    const firstArg = filteredArgs[0];
+    const format = (filteredArgs[1] || 'video') as 'video' | 'audio';
+    const quality = filteredArgs[2] || 'best';
 
     if (!firstArg) {
       await context.socket.sendMessage(context.fromJid, {
-        text: '❌ Please provide a YouTube URL or song name.\n\nUsage: !youtube <youtube-url> [format] [quality]\n       !play <song name>\n\nExample: !youtube https://youtube.com/watch?v=xxx audio\nExample: !play shape of you',
+        text: '❌ Please provide a YouTube URL or song name.\n\nUsage: !youtube <youtube-url> [format] [quality] [--doc]\n       !play <song name> [--doc]\n\nExample: !youtube https://youtube.com/watch?v=xxx audio --doc\nExample: !play shape of you --doc',
       });
       return;
     }
@@ -210,7 +227,7 @@ const youtubeCommand: CommandModule = {
 
     if (!isUrl) {
       // Search mode: treat input as song name, show buttons to choose quality
-      const query = args.join(' ');
+      const query = filteredArgs.join(' ');
       try {
         await context.socket.sendMessage(context.fromJid, {
           text: `🔍 Searching for "${query}"...`,
@@ -225,6 +242,8 @@ const youtubeCommand: CommandModule = {
           noCheckCertificates: true,
           preferFreeFormats: true,
           printJson: true,
+          simulate: true,
+          skipDownload: true,
           defaultSearch: 'ytsearch1',
         };
 
@@ -253,7 +272,7 @@ const youtubeCommand: CommandModule = {
 👁️ ${formatViews(output.view_count)} views
 📅 ${formatUploadDate(output.upload_date)}`;
 
-        await context.socket.sendMessage(context.fromJid, createButtonMessage(caption, videoUrl));
+        await context.socket.sendMessage(context.fromJid, createButtonMessage(caption, videoUrl, asDocument));
 
       } catch (error: unknown) {
         console.error('YouTube search error:', error);
@@ -267,7 +286,7 @@ const youtubeCommand: CommandModule = {
     const url = firstArg;
 
     // If only URL is provided, check if it's a short video first
-    if (args.length === 1) {
+    if (filteredArgs.length === 1) {
       try {
         // Get video info first
         const tempDir = path.join(process.cwd(), 'temp');
@@ -290,7 +309,7 @@ const youtubeCommand: CommandModule = {
 
         if (isShortVideo) {
           // For short videos, download directly without showing buttons
-          await downloadMedia(context, url, 'video', 'best');
+          await downloadMedia(context, url, 'video', 'best', asDocument);
           return;
         }
 
@@ -302,7 +321,7 @@ const youtubeCommand: CommandModule = {
 👁️ ${formatViews(output.view_count)} views
 📅 ${formatUploadDate(output.upload_date)}`;
 
-        await context.socket.sendMessage(context.fromJid, createButtonMessage(caption, url));
+        await context.socket.sendMessage(context.fromJid, createButtonMessage(caption, url, asDocument));
 
       } catch (error) {
         console.error('Error getting video info:', error);
@@ -322,7 +341,7 @@ const youtubeCommand: CommandModule = {
     }
 
     try {
-      await downloadMedia(context, url, format, quality);
+      await downloadMedia(context, url, format, quality, asDocument);
     } catch (error: unknown) {
       console.error('YouTube download error:', error);
 

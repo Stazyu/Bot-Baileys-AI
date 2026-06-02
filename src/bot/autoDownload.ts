@@ -95,6 +95,7 @@ export async function downloadFromSocialMedia(
 
 async function downloadInstagram(url: string, socket: WASocket, fromJid: string): Promise<DownloadResult> {
   try {
+    const startTime = Date.now();
     const result = await nexo.instagram(url);
 
     if (result.data?.url && result.data.url.length > 0) {
@@ -102,14 +103,16 @@ async function downloadInstagram(url: string, socket: WASocket, fromJid: string)
       const isVideo = result.data.isVideo;
 
       if (isVideo) {
+        const processTime = ((Date.now() - startTime) / 1000).toFixed(2);
         await socket.sendMessage(fromJid, {
           video: { url: mediaUrl },
-          caption: '📸 Instagram Video\n\n_Downloaded automatically_',
+          caption: `📸 Instagram Video\n\n⏱️ Process Time: ${processTime} seconds\n\n_Downloaded automatically_`,
         });
       } else {
+        const processTime = ((Date.now() - startTime) / 1000).toFixed(2);
         await socket.sendMessage(fromJid, {
           image: { url: mediaUrl },
-          caption: '📸 Instagram Photo\n\n_Downloaded automatically_',
+          caption: `📸 Instagram Photo\n\n⏱️ Process Time: ${processTime} seconds\n\n_Downloaded automatically_`,
         });
       }
 
@@ -137,6 +140,7 @@ async function downloadInstagram(url: string, socket: WASocket, fromJid: string)
 
 async function downloadTikTok(url: string, socket: WASocket, fromJid: string): Promise<DownloadResult> {
   try {
+    const startTime = Date.now();
     console.log('Downloading TikTok:', url);
     const result = await Tiktok.Downloader(url, {
       version: 'v1',
@@ -154,12 +158,13 @@ async function downloadTikTok(url: string, socket: WASocket, fromJid: string): P
 
     if (result.status === 'success' && result.result) {
       const data = result.result;
+      const processTime = ((Date.now() - startTime) / 1000).toFixed(2);
       const caption = `🎵 *TikTok Download*\n\n` +
         `👤 *Author:* ${data.author.nickname} (@${data.author.username})\n` +
         `❤️ *Likes:* ${data.statistics.likeCount}\n` +
         `💬 *Comments:* ${data.statistics.commentCount}\n` +
         `🔗 *Shares:* ${data.statistics.shareCount}\n\n` +
-        `_Downloaded automatically_`;
+        `⏱️ *Process Time:* ${processTime} seconds\n\n_Downloaded automatically_`;
 
       if (data.type === 'video' && data.video) {
         const videoUrl = data.video.playAddr[0];
@@ -214,12 +219,13 @@ async function downloadTikTok(url: string, socket: WASocket, fromJid: string): P
 
 async function downloadYouTube(url: string, socket: WASocket, fromJid: string): Promise<DownloadResult> {
   try {
+    const startTime = Date.now();
     const result = await nexo.youtube(url);
 
     if (result.data?.result) {
-      // YouTube return Buffer, perlu handle berbeda
+      const processTime = ((Date.now() - startTime) / 1000).toFixed(2);
       await socket.sendMessage(fromJid, {
-        text: '🎥 YouTube download belum diimplementasi penuh. Gunakan command !youtube untuk manual download.',
+        text: `🎥 YouTube download belum diimplementasi penuh. Gunakan command !youtube untuk manual download.\n\n⏱️ Process Time: ${processTime} seconds`,
       });
       return {
         success: false,
@@ -245,14 +251,16 @@ async function downloadYouTube(url: string, socket: WASocket, fromJid: string): 
 
 async function downloadFacebook(url: string, socket: WASocket, fromJid: string): Promise<DownloadResult> {
   try {
+    const startTime = Date.now();
     const result = await nexo.facebook(url);
 
     if (result.data?.result && result.data.result.length > 0) {
       const mediaUrl = result.data.result[0].url;
+      const processTime = ((Date.now() - startTime) / 1000).toFixed(2);
 
       await socket.sendMessage(fromJid, {
         video: { url: mediaUrl },
-        caption: '📘 Facebook Video\n\n_Downloaded automatically_',
+        caption: `📘 Facebook Video\n\n⏱️ Process Time: ${processTime} seconds\n\n_Downloaded automatically_`,
       });
 
       return {
@@ -279,14 +287,16 @@ async function downloadFacebook(url: string, socket: WASocket, fromJid: string):
 
 async function downloadTwitter(url: string, socket: WASocket, fromJid: string): Promise<DownloadResult> {
   try {
+    const startTime = Date.now();
     const result = await nexo.twitter(url);
 
     if (result.data?.result && result.data.result.length > 0) {
       const mediaUrl = result.data.result[0].url;
+      const processTime = ((Date.now() - startTime) / 1000).toFixed(2);
 
       await socket.sendMessage(fromJid, {
         video: { url: mediaUrl },
-        caption: '🐦 Twitter/X Video\n\n_Downloaded automatically_',
+        caption: `🐦 Twitter/X Video\n\n⏱️ Process Time: ${processTime} seconds\n\n_Downloaded automatically_`,
       });
 
       return {
