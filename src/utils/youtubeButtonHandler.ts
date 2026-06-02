@@ -47,7 +47,8 @@ export async function handleYouTubeButton(context: CommandContext, buttonId: str
       quality = 'best';
     }
 
-    await downloadYouTubeMedia(context, url, downloadFormat, quality);
+    const asDocument = parts[0] === 'ytdoc';
+    await downloadYouTubeMedia(context, url, downloadFormat, quality, asDocument);
 
   } catch (error) {
     console.error('YouTube button handler error:', error);
@@ -57,7 +58,7 @@ export async function handleYouTubeButton(context: CommandContext, buttonId: str
   }
 }
 
-async function downloadYouTubeMedia(context: CommandContext, url: string, format: 'video' | 'audio', quality: string): Promise<void> {
+async function downloadYouTubeMedia(context: CommandContext, url: string, format: 'video' | 'audio', quality: string, asDocument: boolean = false): Promise<void> {
   const startTime = Date.now();
 
   await context.socket.sendMessage(context.fromJid, {
@@ -158,7 +159,14 @@ Quality: ${quality}
 Size: ${(fileStats.size / 1024 / 1024).toFixed(2)}MB
 ⚡ Processing time: ${processingTime}`;
 
-  if (format === 'audio') {
+  if (asDocument) {
+    await context.socket.sendMessage(context.fromJid, {
+      document: { url: filePath },
+      mimetype: format === 'audio' ? 'audio/mpeg' : 'video/mp4',
+      fileName: `${info.title || 'video'}.${ext}`,
+      caption,
+    });
+  } else if (format === 'audio') {
     await context.socket.sendMessage(context.fromJid, {
       audio: { url: filePath },
       mimetype: 'audio/mpeg',
