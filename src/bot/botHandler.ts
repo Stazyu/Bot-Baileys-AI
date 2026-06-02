@@ -431,7 +431,7 @@ export class BotHandler {
             false;
         }
 
-        const isCalled = body?.toLowerCase() ? /(^|\s)(bot|bang\s*bot|kak\s*bot|mas\s*bot)/i.test(body) : false;
+        const isCalled = body?.toLowerCase() ? /(^|\s)(bot\b|bang\s*bot\b|kak\s*bot\b|mas\s*bot\b)/i.test(body) : false;
 
         if (isBotMentioned || isReplyToBot || isCalled) {
           console.log(`[${this.sessionId}] 🤖 Group auto-reply triggered for: ${from}`);
