@@ -424,6 +424,7 @@ export class BotHandler {
         );
 
         let isReplyToBot = false;
+        const tagAll = quotedInfo && (quotedInfo.nonJidMentions === 1)
         if (quotedInfo?.quotedMessage) {
           const quotedParticipant = quotedInfo.participant || '';
           isReplyToBot = (botNumberLid && quotedParticipant.includes(botNumberLid)) ||
@@ -433,7 +434,7 @@ export class BotHandler {
 
         const isCalled = body?.toLowerCase() ? /(^|\s)(bot\b|bang\s*bot\b|kak\s*bot\b|mas\s*bot\b)/i.test(body) : false;
 
-        if (isBotMentioned || isReplyToBot || isCalled) {
+        if (isBotMentioned || isReplyToBot || isCalled || tagAll) {
           console.log(`[${this.sessionId}] 🤖 Group auto-reply triggered for: ${from}`);
           await this.handleGroupAutoReply(simplified, from, message);
           return;
@@ -510,8 +511,8 @@ export class BotHandler {
       const userId = simplified.user_id || to;
       const pushName = simplified.pushName || 'Kak';
 
-      // message = message.replace
-      console.log('message', message.replace(/@\d+/g, ''));
+      message = message.replace(/@(?:\d+|all)\b/g, '').trimStart();
+      console.log('message', message.trimStart());
 
       const aiService = await import('../services/aiService.js');
 
