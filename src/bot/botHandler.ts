@@ -704,7 +704,7 @@ Konteks platform:
       });
 
       await this.socket.sendMessage(to, {
-        text: `✨ *AI Response:*\n\n${fullResponse}`,
+        text: fullResponse,
       }, { quoted: quotedMessageObj });
     } catch (error: any) {
       console.error(`[${this.sessionId}] ❌ AI Error:`, error);
