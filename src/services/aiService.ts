@@ -117,6 +117,10 @@ export class AIService {
           model: this.model,
           messages: messages,
           stream: true,
+          tools: [
+            { type: 'openrouter:datetime' },
+            { type: 'openrouter:web_search' }
+          ]
         },
         {
           headers: {
