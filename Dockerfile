@@ -14,7 +14,7 @@ WORKDIR /app
 
 # Copy only deps first (cache friendly)
 # pnpm-workspace.yaml is required for pnpm 10 allowBuilds config
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY package.json pnpm-lock.yaml ./
 
 RUN pnpm install --frozen-lockfile
 
