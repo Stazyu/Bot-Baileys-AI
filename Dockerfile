@@ -13,12 +13,12 @@ RUN corepack enable && corepack prepare pnpm@10.33.4 --activate
 WORKDIR /app
 
 # Copy only deps first (cache friendly)
-COPY package.json pnpm-lock.yaml ./
+# pnpm-workspace.yaml is required for pnpm 10 allowBuilds config
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
-# builder stage
 RUN pnpm install --frozen-lockfile
 
-# 🔥 WAJIB: rebuild sharp di environment Linux
+# Rebuild native modules for the current Linux platform
 RUN pnpm rebuild sharp youtube-dl-exec
 
 # Copy source
@@ -32,25 +32,40 @@ RUN npx prisma generate
 # Build app
 RUN pnpm build
 
-# 🔥 buang dev deps
+# Remove dev dependencies to slim down node_modules
 RUN pnpm prune --prod
 
 
 # ===== RUNTIME (super clean & kecil) =====
-FROM node:20-bookworm-slim
+FROM node:20-bookworm-slim AS runtime
 
 WORKDIR /app
 
-# install only runtime deps (tanpa build tools)
-RUN apt-get update && apt-get install -y \
+# Install only runtime dependencies (no build tools)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libvips \
     openssl \
     ffmpeg \
+    tini \
     && rm -rf /var/lib/apt/lists/*
 
-# copy hasil final saja
-COPY --from=builder /app ./
+# Copy the compiled build output and production node_modules
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/prisma ./prisma
 
 ENV NODE_ENV=production
 
+# 🔥 Auto-skip the 'dev' session when loading from DB.
+# Override at runtime with -e EXCLUDE_SESSIONS="" or -e INCLUDE_SESSIONS="prod,staging"
+ENV EXCLUDE_SESSIONS=dev
+
+# Use tini as PID 1 for proper signal forwarding (SIGINT/SIGTERM)
+ENTRYPOINT ["/usr/bin/tini", "--"]
+
+# Default: run all non-dev sessions from DB
+# Override at runtime:
+#   docker run <image> npm run start:dev      -> only dev session
+#   docker run <image> npm run start:new -- --session=foo --force-clear
 CMD ["node", "dist/index.js"]

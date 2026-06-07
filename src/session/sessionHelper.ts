@@ -114,9 +114,12 @@ export async function disconnectAllSessions(): Promise<void> {
 
 /**
  * Load active sessions from database and attach handlers
+ *
+ * @param forceClear - If true, also passes through to each session's createSession
+ *                     (useful when re-pairing with --force-clear)
  */
-export async function loadActiveSessions(): Promise<void> {
-  await sessionManager.loadActiveSessions();
+export async function loadActiveSessions(forceClear = false): Promise<void> {
+  await sessionManager.loadActiveSessions(forceClear);
 
   // Note: Bot handlers are automatically attached via the callback registered above
   // No need to manually attach them here

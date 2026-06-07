@@ -80,10 +80,21 @@ const AICommand: CommandModule = {
     }
 
     if (args[0]?.toLowerCase() === 'models') {
-      const models = AIService.getAvailableModels();
-      const modelList = models.map(m => `• ${m}`).join('\n');
+      const provider = aiService.getProvider();
+      let models: string[] = [];
+      let info = '';
+      if (provider === 'ollama') {
+        models = await AIService.listOllamaModels();
+        if (models.length === 0) {
+          info = '\n\n⚠️ Tidak bisa terhubung ke Ollama. Pastikan Ollama berjalan dan `OLLAMA_BASE_URL` benar.';
+        }
+      } else {
+        models = AIService.getAvailableOpenRouterModels();
+        info = '\n\nGunakan `!ai model <nama model>` untuk mengganti (hanya owner).';
+      }
+      const modelList = models.map((m: string) => `• ${m}`).join('\n');
       await context.socket.sendMessage(context.fromJid, {
-        text: `🤖 *Model AI yang Tersedia:*\n\n${modelList}\n\nModel saat ini: ${aiService.getModel()}\n\nGunakan !ai model <nama model> untuk mengganti (hanya owner).`,
+        text: `🤖 *Model ${provider.toUpperCase()} yang Tersedia:*\n\n${modelList}\n\nModel saat ini: ${aiService.getModel()}${info}`,
       });
       return;
     }

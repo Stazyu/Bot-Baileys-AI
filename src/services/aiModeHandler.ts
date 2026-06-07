@@ -68,7 +68,7 @@ export class AIModeHandler {
 
     const systemWithHistory = `${DEFAULT_SYSTEM_PROMPT}\n\nRiwayat percakapan:\n${historyMessages}`;
 
-    const response = await aiService.chatWithSystem(userId, userMessage, systemWithHistory);
+    const response = await aiService.chat(userId, userMessage, systemWithHistory);
 
     session.contextMessages.push({
       role: 'assistant',

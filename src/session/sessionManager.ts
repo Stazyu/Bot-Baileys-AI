@@ -299,16 +299,44 @@ export class SessionManager {
     }
   }
 
-  async loadActiveSessions(): Promise<void> {
+  async loadActiveSessions(forceClear = false): Promise<void> {
     try {
       // Load sessions that have authData, regardless of isActive status
       const sessions = await prisma.session.findMany({
         where: { authData: { not: null } },
       });
 
-      for (const session of sessions) {
+      // Optional allowlist / blocklist via env vars (comma-separated session ids)
+      // - INCLUDE_SESSIONS=a,b => only load these
+      // - EXCLUDE_SESSIONS=dev,staging => load all EXCEPT these
+      // INCLUDE wins if both are set.
+      const includeRaw = process.env.INCLUDE_SESSIONS?.trim();
+      const excludeRaw = process.env.EXCLUDE_SESSIONS?.trim();
+      const includeList = includeRaw
+        ? includeRaw.split(',').map(s => s.trim()).filter(Boolean)
+        : null;
+      const excludeList = excludeRaw
+        ? new Set(excludeRaw.split(',').map(s => s.trim()).filter(Boolean))
+        : new Set<string>();
+
+      const filtered = sessions.filter((s) => {
+        if (includeList && !includeList.includes(s.sessionId)) return false;
+        if (excludeList.has(s.sessionId)) return false;
+        return true;
+      });
+
+      const skipped = sessions.length - filtered.length;
+      if (includeList) {
+        log.info(`📦 [SessionManager] INCLUDE_SESSIONS active: loading ${filtered.length}/${sessions.length} session(s)`);
+      } else if (skipped > 0) {
+        log.info(`📦 [SessionManager] EXCLUDE_SESSIONS active: loading ${filtered.length}/${sessions.length} session(s) (skipped: ${[...excludeList].join(', ')})`);
+      } else {
+        log.info(`📦 [SessionManager] Found ${sessions.length} session(s) in database`);
+      }
+
+      for (const session of filtered) {
         log.info(`Loading session: ${session.sessionId}`);
-        await this.createSession(session.sessionId);
+        await this.createSession(session.sessionId, forceClear);
       }
     } catch (error) {
       log.error('Error loading active sessions:', error as object);

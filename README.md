@@ -54,28 +54,84 @@ Multi-session WhatsApp bot with plugin architecture, media download capabilities
 
 ## Usage
 
-### Starting the bot
+### Starting the bot (loads ALL sessions from DB)
 
-To start the bot with existing sessions:
+The bot always reads every saved session from the database and reconnects them.
+Use this for both development and production.
+
 ```bash
+# Development with hot reload (loads all sessions)
 pnpm dev
+
+# Production (loads all sessions)
+pnpm start
 ```
 
-### Creating a new session
+### Pairing a new session (dev or prod)
 
-To create a new WhatsApp session:
+Use these scripts only when you want to add / re-pair a session.
+All other sessions in the DB will still be loaded.
+
 ```bash
-pnpm dev -- --session=my-session-id
+# Development: pair a new session while keeping hot reload
+pnpm dev:new -- --session=my-session-id
+
+# Production: pair a new session
+pnpm start:new -- --session=my-session-id
 ```
 
 The bot will display a QR code in the terminal. Scan it with WhatsApp to authenticate.
 
 ### Force clear session
 
-To force clear and recreate a session:
+To wipe the auth data and re-pair a session from scratch:
+
 ```bash
-pnpm dev -- --session=my-session-id --force-clear
+pnpm dev:new -- --session=my-session-id --force-clear
+pnpm start:new -- --session=my-session-id --force-clear
 ```
+
+> Note: `--force-clear` only affects the target `--session=<id>`. Other
+> sessions loaded from the database are left untouched.
+
+### Excluding sessions from auto-load (env vars)
+
+Use these env vars to filter which sessions are loaded from the database
+on startup. Useful for production Docker where you don't want the `dev`
+session to be running.
+
+```env
+# Skip these session ids (comma-separated). Default in Docker image: dev
+EXCLUDE_SESSIONS=dev
+
+# Or only load these session ids (overrides EXCLUDE_SESSIONS)
+INCLUDE_SESSIONS=
+```
+
+The `pnpm dev:dev` / `start:dev` scripts (with `--only`) bypass this
+filter and run a single session in isolation — use those for local
+development or a separate dev container.
+
+### Running ONLY a specific session (ignore the rest)
+
+Use `--only` to bypass DB loading and run just one session. Other saved
+sessions in the database will NOT be loaded. This is useful for isolating
+a single dev session without interference from prod / other sessions.
+
+```bash
+# Development: run ONLY the 'dev' session, hot reload, others ignored
+pnpm dev:dev
+
+# Production: run ONLY the 'dev' session, others ignored
+pnpm start:dev
+
+# Or combine with another session id
+pnpm dev:new -- --session=staging --only
+```
+
+> First run of `dev:dev` will show a QR code for the `dev` session.
+> After successful pairing, the `authData` is saved to the DB, so
+> subsequent runs reconnect automatically (still in --only mode).
 
 ## Available Commands
 
