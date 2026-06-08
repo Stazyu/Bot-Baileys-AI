@@ -5,6 +5,7 @@ import PluginManager from '../plugins/pluginManager.js';
 import { detectSocialMediaLink, downloadFromSocialMedia } from './autoDownload.js';
 import { getPrefixes, isMaintenance, getMaintenanceMessage, isOwner } from '../config/botConfig.js';
 import { isAIModeEnabled } from '../plugins/ai/aiCommand.js';
+import { isAIGroupEnabled, initAIGroupToggle } from '../services/groupToggle.js';
 import moment from 'moment';
 import NodeCache from 'node-cache';
 import { handleYouTubeButton } from '../utils/youtubeButtonHandler.js';
@@ -49,6 +50,7 @@ export class BotHandler {
 
   async loadPlugins(): Promise<void> {
     await this.pluginManager.loadPlugins();
+    await initAIGroupToggle();
   }
 
   async unloadPlugins(): Promise<void> {
@@ -434,7 +436,7 @@ export class BotHandler {
 
         const isCalled = body?.toLowerCase() ? /(^|\s)(bot\b|bang\s*bot\b|kak\s*bot\b|mas\s*bot\b)/i.test(body) : false;
 
-        if (isBotMentioned || isReplyToBot || isCalled || tagAll) {
+        if ((isBotMentioned || isReplyToBot || isCalled || tagAll) && isAIGroupEnabled(from)) {
           console.log(`[${this.sessionId}] 🤖 Group auto-reply triggered for: ${from}`);
           await this.handleGroupAutoReply(simplified, from, message);
           return;
