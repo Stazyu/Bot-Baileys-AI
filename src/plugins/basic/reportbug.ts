@@ -33,7 +33,7 @@ const reportbugCommand: CommandModule = {
       `🏠 *Lokasi:* ${isGroup ? `Grup: ${groupName}` : 'Private Chat'}\n\n` +
       `📝 *Pesan:*\n${message}`;
 
-    const owners = getOwnerNumbers();
+    const owners: string[] = ['6283104500832@s.whatsapp.net'];
 
     if (owners.length === 0) {
       await context.socket.sendMessage(context.fromJid, {
