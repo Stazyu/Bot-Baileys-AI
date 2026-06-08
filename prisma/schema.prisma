@@ -47,3 +47,44 @@ model BotConfig {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+// ─── Session Metadata ────────────────────────────────────────────
+// Digunakan untuk tracking lifecycle session WhatsApp.
+// Terpisah dari auth state Baileys (WaAuthState).
+model WaSession {
+  id                 String   @id @default(auto()) @map("_id") @db.ObjectId
+  sessionId          String   @unique
+  phoneNumber        String?
+  status             String   @default("disconnected")
+  isActive           Boolean  @default(false)
+
+  lastConnectedAt    DateTime?
+  lastDisconnectedAt DateTime?
+  lastQrAt           DateTime?
+
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  authStates         WaAuthState[]
+}
+
+// ─── Baileys Auth State ──────────────────────────────────────────
+// Setiap baris menyimpan satu credential/key dari Baileys.
+// - creds  → type="creds",   key="creds"
+// - keys   → type=<keyType>, key=<id>
+// Compound unique mencegah duplikasi (digunakan untuk upsert).
+model WaAuthState {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  sessionId String
+  type      String
+  key       String
+  value     Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session   WaSession @relation(fields: [sessionId], references: [sessionId], onDelete: Cascade)
+
+  @@unique([sessionId, type, key])
+  @@index([sessionId])
+}

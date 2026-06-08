@@ -9,9 +9,8 @@ import type { WASocket } from '@innovatorssoft/baileys';
 import pino from 'pino';
 import pinoPretty from 'pino-pretty';
 import { Boom } from '@hapi/boom';
-import { Prisma } from '@prisma/client';
 import prisma from '../database/prisma.js';
-import { useMultiFileAuthStateDB } from './authStateDB.js';
+import { usePrismaAuthState } from '../libs/baileys/usePrismaAuthState.js';
 import { log } from '../utils/logger.js';
 import QRCode from 'qrcode';
 import NodeCache from 'node-cache';
@@ -30,6 +29,7 @@ export class SessionManager {
   private maxReconnectAttempts = 5;
   private sessionCallbacks: SessionCallback[] = [];
   private disconnectCallbacks: SessionDisconnectCallback[] = [];
+  private saveCredsMap: Map<string, () => Promise<void>> = new Map();
   private logger = pino(
     { level: 'silent' },
     pinoPretty({
@@ -45,9 +45,14 @@ export class SessionManager {
     if (this.sessions.has(sessionId) && !forceClear) {
       const socket = this.sessions.get(sessionId)!;
       log.info(`🔄 [SessionManager] Session ${sessionId} already exists, registering handlers`);
-      const { saveCreds } = await useMultiFileAuthStateDB(sessionId, forceClear);
-      // const { saveCreds } = await useMultiFileAuthState(path.join(process.cwd(), 'sessions', sessionId));
-      this.registerMessageHandlers(socket, sessionId, saveCreds);
+      const saveCreds = this.saveCredsMap.get(sessionId);
+      if (saveCreds) {
+        this.registerMessageHandlers(socket, sessionId, saveCreds);
+      } else {
+        const { saveCreds: sc } = await usePrismaAuthState(sessionId);
+        this.saveCredsMap.set(sessionId, sc);
+        this.registerMessageHandlers(socket, sessionId, sc);
+      }
       return socket;
     }
 
@@ -56,14 +61,13 @@ export class SessionManager {
       this.sessions.delete(sessionId);
     }
 
-    const { state, saveCreds } = await useMultiFileAuthStateDB(sessionId, forceClear);
-    // const { state, saveCreds } = await useMultiFileAuthState(path.join(process.cwd(), 'sessions', sessionId));
+    const { state, saveCreds } = await usePrismaAuthState(sessionId, forceClear);
+    this.saveCredsMap.set(sessionId, saveCreds);
 
     const socket = makeWASocket({
       auth: state,
       version: [2, 3000, 1039568566],
       logger: this.logger,
-      // browser: ['Bot-Baileys-AI', 'Chrome', '1.0.0'],
       browser: Browsers.windows('Bot-Baileys-AI'),
       generateHighQualityLinkPreview: true,
       cachedGroupMetadata: async (jid) => this.groupCache.get(jid),
@@ -82,7 +86,7 @@ export class SessionManager {
     this.sessions.set(sessionId, socket);
 
     // Save session to database
-    await this.saveSessionToDB(sessionId, socket);
+    await this.saveSessionToDB(sessionId);
 
     // Trigger callbacks for new session (only when actually creating a new socket)
     await this.triggerCallbacks(socket, sessionId);
@@ -118,21 +122,30 @@ export class SessionManager {
     }
   }
 
+  private async updateWaSessionMeta(
+    sessionId: string,
+    data: {
+      status?: string;
+      isActive?: boolean;
+      phoneNumber?: string | null;
+      lastConnectedAt?: Date | null;
+      lastDisconnectedAt?: Date | null;
+      lastQrAt?: Date | null;
+    },
+  ): Promise<void> {
+    try {
+      await prisma.waSession.upsert({
+        where: { sessionId },
+        update: data,
+        create: { sessionId, ...data },
+      });
+    } catch (err) {
+      log.error(`[WaSession] Gagal update metadata "${sessionId}":`, err as object);
+    }
+  }
+
   private registerMessageHandlers(socket: WASocket, sessionId: string, saveCreds: () => Promise<void>): void {
     log.info(`🔌 [SessionManager] Registering event handlers for session: ${sessionId}`);
-
-    // Test message handler - log ALL messages to see if socket receives anything
-    // socket.ev.on('messages.upsert', (m) => {
-    //   console.log('🔔 [SessionManager] messages.upsert triggered:', {
-    //     type: m.type,
-    //     count: m.messages.length,
-    //     messages: m.messages.map((msg: any) => ({
-    //       key: msg.key,
-    //       hasMessage: !!msg.message,
-    //       messageKeys: msg.message ? Object.keys(msg.message) : 'none',
-    //     })),
-    //   });
-    // });
 
     // Save credentials on update
     socket.ev.on('creds.update', saveCreds);
@@ -170,16 +183,29 @@ export class SessionManager {
       if (qr) {
         log.info(`QR Code for session ${sessionId}:`);
         log.info(await QRCode.toString(qr, { type: 'terminal', small: true }));
+        await this.updateWaSessionMeta(sessionId, {
+          status: 'qr',
+          isActive: false,
+          lastQrAt: new Date(),
+        });
       }
 
       if (connection === 'close') {
-        const shouldReconnect =
-          (lastDisconnect?.error as Boom)?.output?.statusCode !==
+        const isLoggedOut =
+          (lastDisconnect?.error as Boom)?.output?.statusCode ===
           DisconnectReason.loggedOut;
+
+        const shouldReconnect = !isLoggedOut;
 
         log.info(
           `Connection closed for session ${sessionId}. Reconnecting: ${shouldReconnect}`
         );
+
+        await this.updateWaSessionMeta(sessionId, {
+          status: isLoggedOut ? 'logged_out' : 'disconnected',
+          isActive: false,
+          lastDisconnectedAt: new Date(),
+        });
 
         if (shouldReconnect) {
           const attempts = this.reconnectAttempts.get(sessionId) || 0;
@@ -187,7 +213,7 @@ export class SessionManager {
           if (attempts >= this.maxReconnectAttempts) {
             log.error(`Max reconnection attempts (${this.maxReconnectAttempts}) reached for session ${sessionId}`);
             this.reconnectAttempts.delete(sessionId);
-            await this.deleteSessionFromDB(sessionId);
+            this.saveCredsMap.delete(sessionId);
             this.sessions.delete(sessionId);
             await this.triggerDisconnectCallbacks(sessionId);
             return;
@@ -200,32 +226,29 @@ export class SessionManager {
 
           setTimeout(async () => {
             this.sessions.delete(sessionId);
+            this.saveCredsMap.delete(sessionId);
             await this.triggerDisconnectCallbacks(sessionId);
             await this.createSession(sessionId);
           }, backoffDelay);
         } else {
-          // Delete session from database if logged out
           this.reconnectAttempts.delete(sessionId);
-          await this.deleteSessionFromDB(sessionId);
+          this.saveCredsMap.delete(sessionId);
           this.sessions.delete(sessionId);
           await this.triggerDisconnectCallbacks(sessionId);
         }
       } else if (connection === 'open') {
-        // Reset reconnection attempts on successful connection
         this.reconnectAttempts.delete(sessionId);
         log.info(`Connection opened for session ${sessionId}`);
 
-        // Update phone number in database
-        const authState = socket.user;
-        if (authState?.id) {
-          await prisma.session.update({
-            where: { sessionId },
-            data: {
-              phoneNumber: authState.id.split(':')[0] || authState.id,
-              isActive: true,
-            },
-          });
-        }
+        const userId = socket.user?.id;
+        const phoneNumber = userId?.split(':')[0] || userId || null;
+
+        await this.updateWaSessionMeta(sessionId, {
+          status: 'connected',
+          isActive: true,
+          lastConnectedAt: new Date(),
+          phoneNumber,
+        });
       }
     });
 
@@ -258,10 +281,11 @@ export class SessionManager {
       } catch (error) {
         log.error(`Error ending session ${sessionId}:`, error as object);
       }
-      // Mark as inactive but keep authData
-      await prisma.session.update({
+      // Mark as inactive but keep auth data
+      await prisma.waSession.upsert({
         where: { sessionId },
-        data: { isActive: false },
+        update: { isActive: false, status: 'disconnected' },
+        create: { sessionId, isActive: false, status: 'disconnected' },
       }).catch(() => {
         // Session might not exist, that's ok
       });
@@ -270,18 +294,12 @@ export class SessionManager {
     this.sessions.clear();
   }
 
-  private async saveSessionToDB(
-    sessionId: string,
-    socket: WASocket
-  ): Promise<void> {
+  private async saveSessionToDB(sessionId: string): Promise<void> {
     try {
-      await prisma.session.upsert({
+      await prisma.waSession.upsert({
         where: { sessionId },
         update: { isActive: true },
-        create: {
-          sessionId,
-          isActive: true,
-        },
+        create: { sessionId, isActive: true },
       });
     } catch (error) {
       log.error(`Error saving session ${sessionId} to DB:`, error as object);
@@ -290,9 +308,10 @@ export class SessionManager {
 
   private async deleteSessionFromDB(sessionId: string): Promise<void> {
     try {
-      await prisma.session.update({
+      await prisma.waSession.upsert({
         where: { sessionId },
-        data: { isActive: false, authData: null },
+        update: { isActive: false, status: 'disconnected' },
+        create: { sessionId, isActive: false, status: 'disconnected' },
       });
     } catch (error) {
       log.error(`Error deleting session ${sessionId} from DB:`, error as object);
@@ -301,10 +320,19 @@ export class SessionManager {
 
   async loadActiveSessions(forceClear = false): Promise<void> {
     try {
-      // Load sessions that have authData, regardless of isActive status
-      const sessions = await prisma.session.findMany({
-        where: { authData: { not: null } },
+      // Cari session yang punya creds di WaAuthState (tidak peduli status isActive)
+      const credsRows = await prisma.waAuthState.findMany({
+        where: { type: 'creds', key: 'creds' },
+        select: { sessionId: true },
       });
+      const seen = new Set<string>();
+      const sessionIds: string[] = [];
+      for (const r of credsRows) {
+        if (!seen.has(r.sessionId)) {
+          seen.add(r.sessionId);
+          sessionIds.push(r.sessionId);
+        }
+      }
 
       // Optional allowlist / blocklist via env vars (comma-separated session ids)
       // - INCLUDE_SESSIONS=a,b => only load these
@@ -319,24 +347,24 @@ export class SessionManager {
         ? new Set(excludeRaw.split(',').map(s => s.trim()).filter(Boolean))
         : new Set<string>();
 
-      const filtered = sessions.filter((s) => {
-        if (includeList && !includeList.includes(s.sessionId)) return false;
-        if (excludeList.has(s.sessionId)) return false;
+      const filtered = sessionIds.filter((sid) => {
+        if (includeList && !includeList.includes(sid)) return false;
+        if (excludeList.has(sid)) return false;
         return true;
       });
 
-      const skipped = sessions.length - filtered.length;
+      const skipped = sessionIds.length - filtered.length;
       if (includeList) {
-        log.info(`📦 [SessionManager] INCLUDE_SESSIONS active: loading ${filtered.length}/${sessions.length} session(s)`);
+        log.info(`📦 [SessionManager] INCLUDE_SESSIONS active: loading ${filtered.length}/${sessionIds.length} session(s)`);
       } else if (skipped > 0) {
-        log.info(`📦 [SessionManager] EXCLUDE_SESSIONS active: loading ${filtered.length}/${sessions.length} session(s) (skipped: ${[...excludeList].join(', ')})`);
+        log.info(`📦 [SessionManager] EXCLUDE_SESSIONS active: loading ${filtered.length}/${sessionIds.length} session(s) (skipped: ${[...excludeList].join(', ')})`);
       } else {
-        log.info(`📦 [SessionManager] Found ${sessions.length} session(s) in database`);
+        log.info(`📦 [SessionManager] Found ${sessionIds.length} session(s) in database`);
       }
 
-      for (const session of filtered) {
-        log.info(`Loading session: ${session.sessionId}`);
-        await this.createSession(session.sessionId, forceClear);
+      for (const sid of filtered) {
+        log.info(`Loading session: ${sid}`);
+        await this.createSession(sid, forceClear);
       }
     } catch (error) {
       log.error('Error loading active sessions:', error as object);
