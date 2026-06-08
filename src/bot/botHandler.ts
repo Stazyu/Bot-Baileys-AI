@@ -441,9 +441,9 @@ export class BotHandler {
         }
       }
 
-      // Check if AI mode is enabled for this user (only for non-commands)
+      // Check if AI mode is enabled for this user (only for non-commands, private chat only)
       const aiEnabled = isAIModeEnabled(user_id || simplified.from || '');
-      if (!isCmd && aiEnabled && body && from) {
+      if (!isCmd && aiEnabled && body && from && !isGroup) {
         await this.handleAIMessage(simplified, body, from, message);
         return;
       }
