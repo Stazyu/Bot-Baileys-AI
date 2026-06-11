@@ -43,6 +43,7 @@ WORKDIR /app
 
 # Install only runtime dependencies (no build tools)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
     libvips \
     openssl \
     ffmpeg \
