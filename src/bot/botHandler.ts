@@ -750,7 +750,9 @@ export class BotHandler {
       message = message.replace(/@(?:\d+|all)\b/g, '').trimStart();
       log.info(`[${this.sessionId}] 💬 Group auto-reply message: "${message.substring(0, 100)}${message.length > 100 ? '...' : ''}"`);
 
-      const aiService = await import('../services/aiService.js');
+      // Using AiSdkService (Vercel AI SDK) — the original AIService (aiService.js)
+      // is preserved alongside for reference.
+      const aiService = await import('../services/aiSdkService.js');
       const { getGroupSystemPrompt } = await import('../services/systemPrompt.js');
 
       const toolContext = {
@@ -789,10 +791,12 @@ export class BotHandler {
       }
 
       // Safety filter: strip any remaining tool call artifacts
-      const safeResponse = stripToolCallArtifacts(fullResponse);
+      const safeResponse = stripToolCallArtifacts(fullResponse) || 'Ada yang bisa dibantu?';
 
       if (!safeResponse || safeResponse.trim().length === 0) {
-        log.warn(`[${this.sessionId}] ⚠️ Empty AI response for group auto-reply, skipping`);
+        log.warn(`[${this.sessionId}] ⚠️ Empty AI response for group auto-reply`);
+        // Still send a fallback so the user knows the bot received their message
+        await this.socket.sendMessage(to, { text: 'Maaf, saya tidak bisa memproses permintaan itu saat ini.' });
         return;
       }
 
@@ -843,7 +847,9 @@ export class BotHandler {
         return;
       }
 
-      const aiService = await import('../services/aiService.js');
+      // Using AiSdkService (Vercel AI SDK) — the original AIService (aiService.js)
+      // is preserved alongside for reference.
+      const aiService = await import('../services/aiSdkService.js');
       const { getSystemPrompt } = await import('../services/systemPrompt.js');
 
       const systemPrompt = getSystemPrompt();
@@ -881,7 +887,11 @@ export class BotHandler {
       const safeResponse = stripToolCallArtifacts(fullResponse);
 
       if (!safeResponse || safeResponse.trim().length === 0) {
-        log.warn(`[${this.sessionId}] ⚠️ Empty AI response, skipping`);
+        log.warn(`[${this.sessionId}] ⚠️ Empty AI response, sending fallback`);
+        // Send a fallback so the user knows the bot received their message
+        await this.socket.sendMessage(to, {
+          text: 'Maaf, saya tidak bisa memproses permintaan itu saat ini.',
+        });
         return;
       }
 

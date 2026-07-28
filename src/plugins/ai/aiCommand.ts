@@ -1,7 +1,7 @@
 import type { WASocket } from '@innovatorssoft/baileys';
 import type { CommandModule } from '../../types/index.js';
 import type { ToolContext } from '../../types/tools.js';
-import aiService, { AIService } from '../../services/aiService.js';
+import aiService, { AiSdkService } from '../../services/aiSdkService.js';
 import { isOwner } from '../../config/botConfig.js';
 import { getSystemPrompt } from '../../services/systemPrompt.js';
 import { stripToolCallArtifacts } from '../../utils/toolCallFilter.js';
@@ -69,14 +69,14 @@ const AICommand: CommandModule = {
       let info = '';
 
       if (provider === 'ollama') {
-        models = await AIService.listOllamaModels();
+        models = await AiSdkService.listOllamaModels();
         if (models.length === 0) {
           info = '\n\n⚠️ Tidak bisa terhubung ke Ollama. Pastikan Ollama berjalan dan `OLLAMA_BASE_URL` benar.';
         }
         info += '\n\nGunakan `!ai model <nama model>` untuk mengganti (hanya owner).';
       } else if (provider === 'openai' || provider === 'other') {
         // OpenAI-compatible custom API — coba fetch dari endpoint /models
-        models = await AIService.getAvailableModels(provider);
+        models = await AiSdkService.getAvailableModels(provider);
         if (models.length === 0) {
           info = '\n\n⚠️ Tidak bisa mengambil daftar model dari API. Set model manual dengan `!ai model <nama model>`.';
         } else {
@@ -84,9 +84,9 @@ const AICommand: CommandModule = {
         }
       } else {
         // openrouter
-        models = await AIService.getAvailableModels('openrouter');
+        models = await AiSdkService.getAvailableModels('openrouter');
         if (models.length === 0) {
-          models = AIService.getAvailableOpenRouterModels();
+          models = AiSdkService.getAvailableOpenRouterModels();
         }
         info = '\n\nGunakan `!ai model <nama model>` untuk mengganti (hanya owner).';
       }
@@ -110,7 +110,7 @@ const AICommand: CommandModule = {
     if (!question) {
       await context.socket.sendMessage(context.fromJid, {
         text: `📖 *Cara Penggunaan AI:*
-
+ 
 • ${context.simplified?.prefix || '!'}ai on - Aktifkan mode AI
 • ${context.simplified?.prefix || '!'}ai off - Nonaktifkan mode AI
 • ${context.simplified?.prefix || '!'}ai <pertanyaan> - Tanya AI langsung
