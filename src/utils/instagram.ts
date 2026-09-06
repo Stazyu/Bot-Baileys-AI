@@ -1,6 +1,12 @@
 import { spawn } from 'child_process';
 import { existsSync, mkdirSync, unlinkSync } from 'fs';
 import { join } from 'path';
+import {
+  scrapeInstagram,
+  resolveDownloadTask,
+  type InstagramScrapeResult,
+  type InstagramScrapeResource,
+} from './instagram-savefromins.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -436,18 +442,139 @@ function buildResult(entries: YtDlpEntry[]): {
   };
 }
 
+// ─── SaveFromIns (primary path) ─────────────────────────────────────────────
+
+const SAVEFROMINS_TIMEOUT_MS = 45_000;
+
+/**
+ * Resolve a playable URL for one SaveFromIns resource.
+ * Uses `downloadUrl` directly when present, otherwise converts the
+ * `resourceContent` token into a real link via the download-task SSE flow.
+ */
+async function resolveResourceUrl(
+  res: Pick<InstagramScrapeResource, 'downloadUrl' | 'resourceContent'>,
+): Promise<string | null> {
+  if (res.downloadUrl && res.downloadUrl.startsWith('http')) {
+    return res.downloadUrl;
+  }
+  if (!res.resourceContent) {
+    return null;
+  }
+  const task = await resolveDownloadTask(res.resourceContent);
+  return task.downloadUrl && task.downloadUrl.startsWith('http')
+    ? task.downloadUrl
+    : null;
+}
+
+/**
+ * Score a resource for "best quality" selection: file size first, then any
+ * numeric resolution hint in `quality` ("1080p", "720"), then HD > SD.
+ */
+function resourceScore(res: { size?: number; quality?: string }): number {
+  const size = typeof res.size === 'number' ? res.size : 0;
+  const numeric = Number((res.quality ?? '').match(/\d+/)?.[0] ?? 0);
+  const tier = /hd|high|full/i.test(res.quality ?? '') ? 1000 : 0;
+  return size * 1e-6 + numeric + tier;
+}
+
+/**
+ * Convert a SaveFromIns scrape result into the shared InstagramResult shape.
+ *
+ * The API returns multiple quality variants per media item, so each item
+ * (top-level resource id, or carousel slide) contributes exactly one URL —
+ * the best-scoring one. Throws when nothing resolves.
+ */
+async function buildResultFromScrape(
+  scrape: InstagramScrapeResult,
+): Promise<InstagramResult> {
+  type Candidate = {
+    downloadUrl: string;
+    resourceContent: string;
+    type: string;
+    format: string;
+    quality: string;
+    size?: number;
+  };
+
+  // Group variants: carousel → one group per slide; single post → group by resource id.
+  const groups: Candidate[][] = [];
+  if (scrape.carouselMedia.length > 0) {
+    for (const m of scrape.carouselMedia) groups.push(m.resources as Candidate[]);
+  } else {
+    const byId = new Map<string, Candidate[]>();
+    for (const r of scrape.resources) {
+      const bucket = byId.get(r.id);
+      if (bucket) bucket.push(r);
+      else byId.set(r.id, [r]);
+    }
+    groups.push(...byId.values());
+  }
+
+  const urls: string[] = [];
+  let hasVideo = false;
+
+  for (const group of groups) {
+    if (group.length === 0) continue;
+    const best = group.reduce((a, b) => (resourceScore(b) > resourceScore(a) ? b : a));
+    const isVideoRes =
+      best.type.toLowerCase().includes('video') || best.format.toLowerCase() === 'mp4';
+
+    try {
+      const resolved = await resolveResourceUrl(best);
+      if (resolved) {
+        urls.push(resolved);
+        if (isVideoRes) hasVideo = true;
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn('[Instagram Utils/SaveFromIns] Resource resolve failed:', msg);
+    }
+  }
+
+  if (urls.length === 0) {
+    throw new Error('Tidak ada URL media yang berhasil diresolve');
+  }
+
+  const isVideo = hasVideo || scrape.duration > 0;
+
+  return {
+    status: true,
+    data: {
+      url: urls,
+      caption: scrape.caption?.trim() ? scrape.caption.trim() : null,
+      username: scrape.author?.username ?? null,
+      like: scrape.stats?.likes ?? null,
+      comment: scrape.stats?.comments ?? null,
+      isVideo,
+      duration: isVideo && scrape.duration > 0 ? scrape.duration : undefined,
+    },
+  };
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /**
- * Extract media info from an Instagram URL using yt-dlp --dump-json.
+ * Extract media info from an Instagram URL.
  *
- * For DASH-streamed video (Reels), this also downloads a merged video+audio
- * file via ffmpeg and returns the local path in `data.mergedFilePath`.
+ * Primary path: SaveFromIns API (`instagram-savefromins.ts`) — fast, direct
+ * download URLs, no ffmpeg merge needed. On any failure (network, private
+ * post, API change) it falls back to yt-dlp --dump-json, which additionally
+ * downloads & merges DASH videos via ffmpeg into `data.mergedFilePath`.
  *
  * @param url - Instagram post, Reel, or carousel URL
  * @returns InstagramResult with status, data, and optional message
  */
 export default async function instagramDownload(url: string): Promise<InstagramResult> {
+  // 1. Primary: SaveFromIns
+  try {
+    const scrape = await scrapeInstagram(url, { timeout: SAVEFROMINS_TIMEOUT_MS });
+    return await buildResultFromScrape(scrape);
+  } catch (sfErr: unknown) {
+    const msg = sfErr instanceof Error ? sfErr.message : String(sfErr);
+    console.warn('[Instagram Utils] SaveFromIns failed, falling back to yt-dlp:', msg);
+  }
+
+  // 2. Fallback: yt-dlp
   try {
     const entries = await getInstagramJson(url);
     const { result, needsMerge, mergeVideoId } = buildResult(entries);
@@ -472,6 +599,7 @@ export default async function instagramDownload(url: string): Promise<InstagramR
     };
   }
 }
+
 
 /**
  * Clean up a temporary merged video file after it has been sent.
