@@ -12,5 +12,5 @@ allowBuilds:
 minimumReleaseAgeExclude:
   - '@ai-sdk/gateway@4.0.51'
   - ai@7.0.64
-  - '@stazyu/baileys@0.2.1'
+  - '@stazyu/baileys@0.2.1 || 0.3.0'
   - '@ai-sdk/openai-compatible@3.0.31'
