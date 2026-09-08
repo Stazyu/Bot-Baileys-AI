@@ -467,6 +467,46 @@ async function resolveResourceUrl(
 }
 
 /**
+ * Cheap first-bytes sniff: does this MP4 carry H.264 video WhatsApp accepts?
+ *
+ * SaveFromIns exposes Instagram's DASH ladder (VP9/AV1, `dash`/`vp09`/`av01`
+ * ftyp brands) next to the progressive H.264/AAC file. WhatsApp's media
+ * transcoder rejects the DASH variants with "ada masalah dengan file video",
+ * so only brands containing `avc1` (or plain `isom`/`mp41` without DASH
+ * markers) are considered safe.
+ */
+async function isWhatsAppSafeVideo(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(url, {
+      headers: { Range: 'bytes=0-63' },
+      signal: AbortSignal.timeout(10_000),
+    });
+    const reader = res.body?.getReader();
+    if (!res.ok && res.status !== 206) {
+      return false;
+    }
+    if (!reader) {
+      return false;
+    }
+    const { value } = await reader.read();
+    await reader.cancel();
+    if (!value || value.length < 12) {
+      return false;
+    }
+    const head = Buffer.from(value.subarray(0, 64)).toString('latin1');
+    if (!head.includes('ftyp')) {
+      return false;
+    }
+    if (/dash|vp09|av01|iso8/i.test(head)) {
+      return false;
+    }
+    return /avc1|mp41|isom/i.test(head);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Score a resource for "best quality" selection: file size first, then any
  * numeric resolution hint in `quality` ("1080p", "720"), then HD > SD.
  */
@@ -480,9 +520,12 @@ function resourceScore(res: { size?: number; quality?: string }): number {
 /**
  * Convert a SaveFromIns scrape result into the shared InstagramResult shape.
  *
- * The API returns multiple quality variants per media item, so each item
- * (top-level resource id, or carousel slide) contributes exactly one URL —
- * the best-scoring one. Throws when nothing resolves.
+ * The API returns multiple quality variants per media item. Each item
+ * (carousel slide, or top-level resource id) contributes exactly one URL:
+ * the best-scoring variant whose codec WhatsApp can actually play. Audio-only
+ * companion resources are skipped — the progressive H.264 file already
+ * contains the AAC track. Throws when no safe variant exists so the caller
+ * falls back to yt-dlp (which ffmpeg-merges to H.264).
  */
 async function buildResultFromScrape(
   scrape: InstagramScrapeResult,
@@ -496,18 +539,29 @@ async function buildResultFromScrape(
     size?: number;
   };
 
-  // Group variants: carousel → one group per slide; single post → group by resource id.
+  // Group variants per media item:
+  // - Multi-slide carousel: one group per `carouselMedia` slide (top-level
+  //   `resources` may only cover part of the post). Each slide is still
+  //   codec-sniffed below; if every variant is VP9/AV1 we throw and let
+  //   yt-dlp handle it.
+  // - Single post/reel: top-level `resources` — the progressive H.264+AAC
+  //   view (one id per media item), grouped by id.
   const groups: Candidate[][] = [];
-  if (scrape.carouselMedia.length > 0) {
+  if (scrape.carouselMedia.length > 1) {
     for (const m of scrape.carouselMedia) groups.push(m.resources as Candidate[]);
   } else {
     const byId = new Map<string, Candidate[]>();
     for (const r of scrape.resources) {
+      if (r.type.toLowerCase() === 'audio') continue;
       const bucket = byId.get(r.id);
       if (bucket) bucket.push(r);
       else byId.set(r.id, [r]);
     }
-    groups.push(...byId.values());
+    if (byId.size > 0) {
+      groups.push(...byId.values());
+    } else if (scrape.carouselMedia.length === 1) {
+      groups.push(scrape.carouselMedia[0].resources as Candidate[]);
+    }
   }
 
   const urls: string[] = [];
@@ -515,20 +569,29 @@ async function buildResultFromScrape(
 
   for (const group of groups) {
     if (group.length === 0) continue;
-    const best = group.reduce((a, b) => (resourceScore(b) > resourceScore(a) ? b : a));
-    const isVideoRes =
-      best.type.toLowerCase().includes('video') || best.format.toLowerCase() === 'mp4';
+    const ranked = [...group].sort((a, b) => resourceScore(b) - resourceScore(a));
+    let picked: string | null = null;
 
-    try {
-      const resolved = await resolveResourceUrl(best);
-      if (resolved) {
-        urls.push(resolved);
-        if (isVideoRes) hasVideo = true;
+    for (const cand of ranked) {
+      const isVideoRes =
+        cand.type.toLowerCase().includes('video') || cand.format.toLowerCase() === 'mp4';
+      try {
+        const resolved = await resolveResourceUrl(cand);
+        if (!resolved) continue;
+        if (isVideoRes && !(await isWhatsAppSafeVideo(resolved))) continue;
+        picked = resolved;
+        hasVideo = hasVideo || isVideoRes;
+        break;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn('[Instagram Utils/SaveFromIns] Resource resolve failed:', msg);
       }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn('[Instagram Utils/SaveFromIns] Resource resolve failed:', msg);
     }
+
+    if (!picked) {
+      throw new Error('Tidak ada varian media yang kompatibel dengan WhatsApp');
+    }
+    urls.push(picked);
   }
 
   if (urls.length === 0) {
