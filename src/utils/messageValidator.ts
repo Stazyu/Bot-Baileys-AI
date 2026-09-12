@@ -42,8 +42,8 @@ const DEFAULT_OPTIONS: Required<ValidationOptions> = {
 const recentMessageIds = new Map<string, number>();
 const DUPLICATE_WINDOW_MS = 5000; // 5 seconds
 
-// Periodic cleanup to prevent memory leaks
-setInterval(() => {
+// Periodic cleanup to prevent memory leaks (unref'd: never keeps process alive)
+const duplicateSweepTimer = setInterval(() => {
   const now = Date.now();
   for (const [id, ts] of recentMessageIds) {
     if (now - ts > DUPLICATE_WINDOW_MS * 2) {
@@ -51,6 +51,14 @@ setInterval(() => {
     }
   }
 }, 60_000);
+if (typeof duplicateSweepTimer.unref === 'function') duplicateSweepTimer.unref();
+
+/**
+ * Stop the duplicate-ID sweep timer (mainly for tests).
+ */
+export function stopValidatorCleanup(): void {
+  clearInterval(duplicateSweepTimer);
+}
 
 /**
  * Extract the text body from any WAMessage type.
@@ -129,6 +137,9 @@ export function validateMessage(
   // ── 5. Body content validation ────────────────────────────────────────
   const body = extractMessageBody(msg.message);
   if (body !== null) {
+    if (body.length === 0) {
+      return { valid: false, reason: 'Message body is empty', code: 'EMPTY_BODY' };
+    }
     if (body.length > opts.maxBodyLength) {
       return {
         valid: false,
@@ -137,13 +148,14 @@ export function validateMessage(
       };
     }
   }
-
   // ── 6. Timestamp validation ──────────────────────────────────────────
   const timestamp = msg.messageTimestamp;
   if (timestamp !== undefined && timestamp !== null) {
     const tsMs = Number(timestamp) * 1000;
+    if (!Number.isFinite(tsMs)) {
+      return { valid: false, reason: 'Message timestamp is not a number', code: 'TIMESTAMP_INVALID' };
+    }
     const nowMs = Date.now();
-
     // Reject messages with timestamps more than `maxMessageAgeSeconds` in the past
     if (nowMs - tsMs > opts.maxMessageAgeSeconds * 1000) {
       return {

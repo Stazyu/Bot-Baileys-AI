@@ -61,37 +61,45 @@ export class SessionManager {
       this.sessions.delete(sessionId);
     }
 
-    const { state, saveCreds } = await usePrismaAuthState(sessionId, forceClear);
-    this.saveCredsMap.set(sessionId, saveCreds);
+    try {
+      const { state, saveCreds } = await usePrismaAuthState(sessionId, forceClear);
+      this.saveCredsMap.set(sessionId, saveCreds);
 
-    const socket = makeWASocket({
-      auth: state,
-      version: [2, 3000, 1039568566],
-      logger: this.logger,
-      browser: Browsers.windows('Bot-Baileys-AI'),
-      generateHighQualityLinkPreview: true,
-      cachedGroupMetadata: async (jid) => this.groupCache.get(jid),
-      getMessage: async (key) => {
-        return (await prisma.message.findFirst({
-          where: {
-            key: key as any,
-          },
-        })) as any;
-      },
-    });
+      const socket = makeWASocket({
+        auth: state,
+        version: [2, 3000, 1039568566],
+        logger: this.logger,
+        browser: Browsers.windows('Bot-Baileys-AI'),
+        generateHighQualityLinkPreview: true,
+        cachedGroupMetadata: async (jid) => this.groupCache.get(jid),
+        getMessage: async (key) => {
+          return (await prisma.message.findFirst({
+            where: {
+              key: key as any,
+            },
+          })) as any;
+        },
+      });
 
-    this.registerMessageHandlers(socket, sessionId, saveCreds);
+      this.registerMessageHandlers(socket, sessionId, saveCreds);
 
-    // Store session
-    this.sessions.set(sessionId, socket);
+      // Store session
+      this.sessions.set(sessionId, socket);
 
-    // Save session to database
-    await this.saveSessionToDB(sessionId);
+      // Save session to database
+      await this.saveSessionToDB(sessionId);
 
-    // Trigger callbacks for new session (only when actually creating a new socket)
-    await this.triggerCallbacks(socket, sessionId);
+      // Trigger callbacks for new session (only when actually creating a new socket)
+      await this.triggerCallbacks(socket, sessionId);
 
-    return socket;
+      return socket;
+    } catch (error) {
+      // Never leave half-registered state behind for a failed session
+      this.saveCredsMap.delete(sessionId);
+      this.sessions.delete(sessionId);
+      log.error(`[SessionManager] Failed to create session "${sessionId}":`, error as object);
+      throw error;
+    }
   }
 
   onSessionCreated(callback: SessionCallback): void {
@@ -178,77 +186,89 @@ export class SessionManager {
 
     // Handle connection updates
     socket.ev.on('connection.update', async (update: Partial<ConnectionState>) => {
-      const { connection, lastDisconnect, qr } = update;
+      try {
+        const { connection, lastDisconnect, qr } = update;
 
-      if (qr) {
-        log.info(`QR Code for session ${sessionId}:`);
-        log.info(await QRCode.toString(qr, { type: 'terminal', small: true }));
-        await this.updateWaSessionMeta(sessionId, {
-          status: 'qr',
-          isActive: false,
-          lastQrAt: new Date(),
-        });
-      }
+        if (qr) {
+          try {
+            log.info(`QR Code for session ${sessionId}:`);
+            log.info(await QRCode.toString(qr, { type: 'terminal', small: true }));
+          } catch (error) {
+            log.error(`Failed to render QR for session ${sessionId}:`, error as object);
+          }
+          await this.updateWaSessionMeta(sessionId, {
+            status: 'qr',
+            isActive: false,
+            lastQrAt: new Date(),
+          });
+        }
 
-      if (connection === 'close') {
-        const isLoggedOut =
-          (lastDisconnect?.error as Boom)?.output?.statusCode ===
-          DisconnectReason.loggedOut;
+        if (connection === 'close') {
+          const isLoggedOut =
+            (lastDisconnect?.error as Boom)?.output?.statusCode ===
+            DisconnectReason.loggedOut;
 
-        const shouldReconnect = !isLoggedOut;
+          const shouldReconnect = !isLoggedOut;
 
-        log.info(
-          `Connection closed for session ${sessionId}. Reconnecting: ${shouldReconnect}`
-        );
+          log.info(
+            `Connection closed for session ${sessionId}. Reconnecting: ${shouldReconnect}`
+          );
 
-        await this.updateWaSessionMeta(sessionId, {
-          status: isLoggedOut ? 'logged_out' : 'disconnected',
-          isActive: false,
-          lastDisconnectedAt: new Date(),
-        });
+          await this.updateWaSessionMeta(sessionId, {
+            status: isLoggedOut ? 'logged_out' : 'disconnected',
+            isActive: false,
+            lastDisconnectedAt: new Date(),
+          });
 
-        if (shouldReconnect) {
-          const attempts = this.reconnectAttempts.get(sessionId) || 0;
+          if (shouldReconnect) {
+            const attempts = this.reconnectAttempts.get(sessionId) || 0;
 
-          if (attempts >= this.maxReconnectAttempts) {
-            log.error(`Max reconnection attempts (${this.maxReconnectAttempts}) reached for session ${sessionId}`);
+            if (attempts >= this.maxReconnectAttempts) {
+              log.error(`Max reconnection attempts (${this.maxReconnectAttempts}) reached for session ${sessionId}`);
+              this.reconnectAttempts.delete(sessionId);
+              this.saveCredsMap.delete(sessionId);
+              this.sessions.delete(sessionId);
+              await this.triggerDisconnectCallbacks(sessionId);
+              return;
+            }
+
+            this.reconnectAttempts.set(sessionId, attempts + 1);
+            const backoffDelay = Math.min(1000 * Math.pow(2, attempts), 30000); // Max 30 seconds
+
+            log.info(`Reconnecting session ${sessionId} in ${backoffDelay}ms (attempt ${attempts + 1}/${this.maxReconnectAttempts})`);
+
+            setTimeout(async () => {
+              try {
+                this.sessions.delete(sessionId);
+                this.saveCredsMap.delete(sessionId);
+                await this.triggerDisconnectCallbacks(sessionId);
+                await this.createSession(sessionId);
+              } catch (error) {
+                log.error(`Reconnect failed for session ${sessionId}:`, error as object);
+              }
+            }, backoffDelay);
+          } else {
             this.reconnectAttempts.delete(sessionId);
             this.saveCredsMap.delete(sessionId);
             this.sessions.delete(sessionId);
             await this.triggerDisconnectCallbacks(sessionId);
-            return;
           }
-
-          this.reconnectAttempts.set(sessionId, attempts + 1);
-          const backoffDelay = Math.min(1000 * Math.pow(2, attempts), 30000); // Max 30 seconds
-
-          log.info(`Reconnecting session ${sessionId} in ${backoffDelay}ms (attempt ${attempts + 1}/${this.maxReconnectAttempts})`);
-
-          setTimeout(async () => {
-            this.sessions.delete(sessionId);
-            this.saveCredsMap.delete(sessionId);
-            await this.triggerDisconnectCallbacks(sessionId);
-            await this.createSession(sessionId);
-          }, backoffDelay);
-        } else {
+        } else if (connection === 'open') {
           this.reconnectAttempts.delete(sessionId);
-          this.saveCredsMap.delete(sessionId);
-          this.sessions.delete(sessionId);
-          await this.triggerDisconnectCallbacks(sessionId);
+          log.info(`Connection opened for session ${sessionId}`);
+
+          const userId = socket.user?.id;
+          const phoneNumber = userId?.split(':')[0] || userId || null;
+
+          await this.updateWaSessionMeta(sessionId, {
+            status: 'connected',
+            isActive: true,
+            lastConnectedAt: new Date(),
+            phoneNumber,
+          });
         }
-      } else if (connection === 'open') {
-        this.reconnectAttempts.delete(sessionId);
-        log.info(`Connection opened for session ${sessionId}`);
-
-        const userId = socket.user?.id;
-        const phoneNumber = userId?.split(':')[0] || userId || null;
-
-        await this.updateWaSessionMeta(sessionId, {
-          status: 'connected',
-          isActive: true,
-          lastConnectedAt: new Date(),
-          phoneNumber,
-        });
+      } catch (error) {
+        log.error(`Error handling connection.update for session ${sessionId}:`, error as object);
       }
     });
 
@@ -265,12 +285,17 @@ export class SessionManager {
 
   async disconnectSession(sessionId: string): Promise<void> {
     const socket = this.sessions.get(sessionId);
-    if (socket) {
+    if (!socket) return;
+    try {
       await socket.logout();
-      this.sessions.delete(sessionId);
-      await this.deleteSessionFromDB(sessionId);
-      await this.triggerDisconnectCallbacks(sessionId);
+    } catch (error) {
+      log.error(`Error logging out session ${sessionId} — forcing local cleanup:`, error as object);
     }
+    this.sessions.delete(sessionId);
+    this.saveCredsMap.delete(sessionId);
+    this.reconnectAttempts.delete(sessionId);
+    await this.deleteSessionFromDB(sessionId);
+    await this.triggerDisconnectCallbacks(sessionId);
   }
 
   async disconnectAllSessions(): Promise<void> {
@@ -363,8 +388,13 @@ export class SessionManager {
       }
 
       for (const sid of filtered) {
-        log.info(`Loading session: ${sid}`);
-        await this.createSession(sid, forceClear);
+        try {
+          log.info(`Loading session: ${sid}`);
+          await this.createSession(sid, forceClear);
+        } catch (error) {
+          // Session isolation: one broken session must never block the rest
+          log.error(`Failed to load session "${sid}" — skipping, others continue:`, error as object);
+        }
       }
     } catch (error) {
       log.error('Error loading active sessions:', error as object);

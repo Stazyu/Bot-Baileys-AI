@@ -61,18 +61,36 @@ async function main() {
   console.log('💡 Use --only with --session=<id> to run only that session');
   console.log('💡 Press Ctrl+C to stop the bot');
 
-  process.on('SIGINT', async () => {
-    console.log('\n🛑 Shutting down bot...');
-    await disconnectAllSessions();
-    await prisma.$disconnect();
+  let shuttingDown = false;
+  const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`\n🛑 Received ${signal} — shutting down bot...`);
+    try {
+      await disconnectAllSessions();
+    } catch (error) {
+      console.error('❌ Error disconnecting sessions during shutdown:', error);
+    }
+    try {
+      await prisma.$disconnect();
+    } catch (error) {
+      console.error('❌ Error disconnecting database during shutdown:', error);
+    }
     process.exit(0);
+  };
+
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+
+  // Process-level safety nets: log and survive instead of crashing the bot.
+  // Per-message/per-session boundaries already contain the fault; these are
+  // the last resort so one unhandled rejection never kills all sessions.
+  process.on('unhandledRejection', (reason) => {
+    console.error('🚨 Unhandled promise rejection (contained, bot keeps running):', reason);
   });
 
-  process.on('SIGTERM', async () => {
-    console.log('\n🛑 Shutting down bot...');
-    await disconnectAllSessions();
-    await prisma.$disconnect();
-    process.exit(0);
+  process.on('uncaughtException', (error) => {
+    console.error('🚨 Uncaught exception (contained, bot keeps running):', error);
   });
 }
 

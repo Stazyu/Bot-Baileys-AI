@@ -492,8 +492,8 @@ export class BotHandler {
 
       // ── Rate limiting check (non-commands only) ────────────────────────
       // Commands skip this — they have their own per-command rate limit below
-      // with a proper cooldown message.
-      if (user_id && !isCmd) {
+      // with a proper cooldown message. Owners bypass cooldowns entirely.
+      if (user_id && !isCmd && !isOwner(user_id)) {
         const rateCheck = rateLimiter.checkMessage(user_id);
         if (!rateCheck.allowed) {
           log.debug(`[${this.sessionId}] ⏱ Rate-limited non-command message from ${user_id} (${rateCheck.remainingMs}ms remaining)`);
@@ -548,8 +548,8 @@ export class BotHandler {
                 return;
               }
             }
-            // Rate-limit group auto-reply per-user
-            if (user_id) {
+            // Rate-limit group auto-reply per-user (owners bypass)
+            if (user_id && !isOwner(user_id)) {
               const aiRateCheck = rateLimiter.check(user_id, '__GROUP_AI__', 3); // 3s per user
               if (!aiRateCheck.allowed) {
                 log.debug(`[${this.sessionId}] ⏱ Rate-limited group AI reply for ${user_id}`);
@@ -586,8 +586,8 @@ export class BotHandler {
                 return;
               }
             }
-            // Rate-limit AI messages per-user
-            if (user_id) {
+            // Rate-limit AI messages per-user (owners bypass)
+            if (user_id && !isOwner(user_id)) {
               const aiRateCheck = rateLimiter.check(user_id, '__AI_CHAT__', 2); // 2s per user
               if (!aiRateCheck.allowed) {
                 log.debug(`[${this.sessionId}] ⏱ Rate-limited AI message from ${user_id}`);
@@ -653,8 +653,8 @@ export class BotHandler {
         const cmdConfig = this.pluginManager.getCommand(command)?.config;
         const effectiveUserId = user_id || from;
 
-        // Rate-limit command execution per-user
-        if (user_id) {
+        // Rate-limit command execution per-user (owners bypass)
+        if (user_id && !isOwner(user_id)) {
           const cooldownSec = cmdConfig?.cooldown ?? 2;
           const cmdRateCheck = rateLimiter.check(user_id, command, cooldownSec);
           if (!cmdRateCheck.allowed) {

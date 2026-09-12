@@ -37,12 +37,13 @@ const DEFAULT_CONFIG: Required<RateLimitConfig> = {
 class RateLimiter {
   private store: Map<string, Map<string, number>> = new Map();
   private config: Required<RateLimitConfig>;
+  private cleanupTimer?: ReturnType<typeof setInterval>;
 
   constructor(config?: Partial<RateLimitConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
-
-    // Periodic cleanup of expired entries to prevent memory leaks
-    setInterval(() => this.cleanup(), 60_000);
+    // NOTE: periodic sweep is opt-in via startAutoCleanup() (unref'd timer).
+    // The constructor must not start a ref'd interval — it would hold the
+    // event loop open and prevent clean exit / hang test runners.
   }
 
   /**
@@ -96,8 +97,37 @@ class RateLimiter {
   }
 
   /**
+   * Start periodic sweep of expired entries. Idempotent — safe to call twice.
+   * Timer is unref'd so it never keeps the process alive on its own.
+   */
+  startAutoCleanup(intervalMs = 60_000): void {
+    if (this.cleanupTimer) return;
+    const timer = setInterval(() => {
+      try {
+        this.cleanup();
+      } catch (error) {
+        log.debug(`🧹 [RateLimiter] Cleanup sweep failed: ${(error as Error).message}`);
+      }
+    }, intervalMs);
+    // Don't hold the event loop open for a housekeeping timer
+    if (typeof timer.unref === 'function') timer.unref();
+    this.cleanupTimer = timer;
+  }
+
+  /**
+   * Stop the periodic sweep (mainly for tests).
+   */
+  stopAutoCleanup(): void {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = undefined;
+    }
+  }
+
+  /**
    * Check if a non-command message action is allowed for a user (e.g., AI mode, auto-reply).
    */
+
   checkMessage(userId: string): RateLimitResult {
     return this.check(userId, '__MESSAGE__', this.config.messageCooldownSec);
   }
@@ -197,7 +227,8 @@ class RateLimiter {
   }
 }
 
-// Singleton instance
+// Singleton instance (auto-cleanup keeps memory bounded across many users)
 export const rateLimiter = new RateLimiter();
+rateLimiter.startAutoCleanup();
 
 export default rateLimiter;
