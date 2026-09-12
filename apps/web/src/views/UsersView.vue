@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Search, Users, UserCheck, Crown, Bot, ArrowUpRight, ArrowDownRight } from '@lucide/vue'
+import { Search, Users, UserCheck, Crown, Bot, ArrowUpRight, ArrowDownRight, type LucideIcon } from '@lucide/vue'
 import Card from '@/components/ui/card/Card.vue'
 import CardContent from '@/components/ui/card/CardContent.vue'
 import CardHeader from '@/components/ui/card/CardHeader.vue'
@@ -213,11 +213,11 @@ const activeUsers = computed(() => users.value.filter((u) => u.status === 'activ
 const premiumUsers = computed(() => users.value.filter((u) => u.premiumTier !== 'free').length)
 const aiModeUsers = computed(() => users.value.filter((u) => u.aiMode).length)
 
-const statCards = computed(() => [
-  { label: 'Total Users', value: totalUsers.value, icon: Users, change: `${activeUsers.value} active`, changeType: 'up' as const },
-  { label: 'Active Today', value: activeUsers.value, icon: UserCheck, change: `${Math.round(activeUsers.value / totalUsers.value * 100)}% active rate`, changeType: 'up' as const },
-  { label: 'Premium Users', value: premiumUsers.value, icon: Crown, change: `${Math.round(premiumUsers.value / totalUsers.value * 100)}% of total`, changeType: 'up' as const },
-  { label: 'AI Mode Users', value: aiModeUsers.value, icon: Bot, change: `${Math.round(aiModeUsers.value / totalUsers.value * 100)}% of total`, changeType: 'up' as const },
+const statCards = computed<{ label: string; value: number; icon: LucideIcon; change: string; changeType: 'up' | 'down' }[]>(() => [
+  { label: 'Total Users', value: totalUsers.value, icon: Users, change: `${activeUsers.value} active`, changeType: 'up' },
+  { label: 'Active Today', value: activeUsers.value, icon: UserCheck, change: `${Math.round(activeUsers.value / totalUsers.value * 100)}% active rate`, changeType: 'up' },
+  { label: 'Premium Users', value: premiumUsers.value, icon: Crown, change: `${Math.round(premiumUsers.value / totalUsers.value * 100)}% of total`, changeType: 'up' },
+  { label: 'AI Mode Users', value: aiModeUsers.value, icon: Bot, change: `${Math.round(aiModeUsers.value / totalUsers.value * 100)}% of total`, changeType: 'up' },
 ])
 
 // ── Search & Filter ────────────────────────────────────────────────
