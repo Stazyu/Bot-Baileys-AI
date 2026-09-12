@@ -1,77 +1,67 @@
 <script setup lang="ts">
-import Card from '@/components/ui/card/Card.vue'
-import CardHeader from '@/components/ui/card/CardHeader.vue'
-import CardTitle from '@/components/ui/card/CardTitle.vue'
-import CardContent from '@/components/ui/card/CardContent.vue'
-import Badge from '@/components/ui/badge/Badge.vue'
+import { AlertTriangle, Command, Download, MessageCircle, Sparkles, Wifi } from '@lucide/vue'
+import type { LucideIcon } from '@lucide/vue'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { cn } from '@/lib/utils'
 
 interface Activity {
   id: string
   type: 'message' | 'command' | 'ai' | 'session' | 'download' | 'error'
   session: string
   detail: string
-  user: string
   time: string
-  group?: string
 }
 
 const activities: Activity[] = [
-  { id: 'a1', type: 'message', session: 'Wahyu', detail: 'Incoming message from group "Keluarga Bahagia"', user: '6281234567890', time: '2 min ago', group: 'Keluarga Bahagia' },
-  { id: 'a2', type: 'command', session: 'Bot Support', detail: 'Command executed: !ping', user: '6289876543210', time: '5 min ago' },
-  { id: 'a3', type: 'ai', session: 'Bot Support', detail: 'AI replied to group mention in "Tech Discussion"', user: '6289876543210', time: '8 min ago', group: 'Tech Discussion' },
-  { id: 'a4', type: 'download', session: 'Wahyu', detail: 'Downloaded Instagram reel', user: '6283334445556', time: '12 min ago' },
-  { id: 'a5', type: 'session', session: 'Shop Bot', detail: 'Session disconnected — reconnecting...', user: '—', time: '18 min ago' },
-  { id: 'a6', type: 'error', session: 'Shop Bot', detail: 'Connection timeout after 30s', user: '—', time: '19 min ago' },
-  { id: 'a7', type: 'command', session: 'Wahyu', detail: 'Command executed: !sticker', user: '6285556667778', time: '22 min ago' },
-  { id: 'a8', type: 'ai', session: 'Wahyu', detail: 'AI mode chat — 4 messages exchanged', user: '6284443332221', time: '25 min ago' },
-  { id: 'a9', type: 'message', session: 'Bot Support', detail: 'Incoming message from group "Project Alpha"', user: '6281110009998', time: '30 min ago', group: 'Project Alpha' },
-  { id: 'a10', type: 'download', session: 'Bot Support', detail: 'Downloaded YouTube audio (mp3)', user: '6282221110007', time: '34 min ago' },
-  { id: 'a11', type: 'session', session: 'Premium Bot', detail: 'QR pairing initiated', user: '—', time: '40 min ago' },
-  { id: 'a12', type: 'command', session: 'Premium Bot', detail: 'Command executed: !help', user: '6287778889990', time: '45 min ago' },
+  { id: 'a1', type: 'message', session: 'Wahyu', detail: 'Incoming message from “Keluarga Bahagia”', time: '2m' },
+  { id: 'a2', type: 'command', session: 'Bot Support', detail: '!ping executed', time: '5m' },
+  { id: 'a3', type: 'ai', session: 'Bot Support', detail: 'AI replied in “Tech Discussion”', time: '8m' },
+  { id: 'a4', type: 'download', session: 'Wahyu', detail: 'Instagram reel saved', time: '12m' },
+  { id: 'a5', type: 'session', session: 'Shop Bot', detail: 'Disconnected — reconnecting…', time: '18m' },
+  { id: 'a6', type: 'error', session: 'Shop Bot', detail: 'Connection timeout after 30s', time: '19m' },
+  { id: 'a7', type: 'command', session: 'Wahyu', detail: '!sticker executed', time: '22m' },
+  { id: 'a8', type: 'ai', session: 'Wahyu', detail: 'AI mode chat — 4 messages', time: '25m' },
+  { id: 'a9', type: 'message', session: 'Bot Support', detail: 'Message from “Project Alpha”', time: '30m' },
+  { id: 'a10', type: 'download', session: 'Bot Support', detail: 'YouTube audio (mp3) saved', time: '34m' },
 ]
 
-const typeBadge = (type: Activity['type']): { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' } => {
-  const map: Record<Activity['type'], { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
-    message: { label: 'MSG', variant: 'secondary' },
-    command: { label: 'CMD', variant: 'outline' },
-    ai: { label: 'AI', variant: 'default' },
-    session: { label: 'SYS', variant: 'secondary' },
-    download: { label: 'DL', variant: 'outline' },
-    error: { label: 'ERR', variant: 'destructive' },
-  }
-  return map[type]
+const typeMeta: Record<Activity['type'], { icon: LucideIcon; bubble: string }> = {
+  message: { icon: MessageCircle, bubble: 'bg-sky-500/10 text-sky-600 dark:text-sky-300' },
+  command: { icon: Command, bubble: 'bg-muted text-muted-foreground' },
+  ai: { icon: Sparkles, bubble: 'bg-violet-500/10 text-violet-600 dark:text-violet-300' },
+  session: { icon: Wifi, bubble: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300' },
+  download: { icon: Download, bubble: 'bg-amber-500/10 text-amber-600 dark:text-amber-300' },
+  error: { icon: AlertTriangle, bubble: 'bg-rose-500/10 text-rose-600 dark:text-rose-300' },
 }
 </script>
 
 <template>
-  <Card>
-    <CardHeader class="flex-row items-center justify-between space-y-0 pb-4">
-      <CardTitle class="text-heading">Recent Activity</CardTitle>
-      <span class="text-xs text-muted-foreground">Last 60 minutes</span>
-    </CardHeader>
-    <CardContent class="p-0">
-      <ScrollArea class="max-h-[520px]">
-        <div
-          v-for="activity in activities"
-          :key="activity.id"
-          class="flex items-start gap-3 border-t border-border px-5 py-3 first:border-t-0 hover:bg-muted/40 transition-design"
-        >
-          <Badge :variant="typeBadge(activity.type).variant" class="mt-0.5 shrink-0 px-1.5 text-[10px] font-bold rounded-sm">
-            {{ typeBadge(activity.type).label }}
-          </Badge>
+  <section class="flex flex-col rounded-[24px] bg-card px-3 py-6 shadow-soft sm:px-4">
+    <header class="flex items-center justify-between px-3 pb-1 sm:px-4">
+      <div>
+        <p class="text-eyebrow text-muted-foreground">Pulse</p>
+        <h3 class="mt-1 text-xl font-bold tracking-tight">Recent Activity</h3>
+      </div>
+      <span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-300">
+        <span class="size-1.5 rounded-full bg-emerald-500" />
+        Live
+      </span>
+    </header>
+    <ScrollArea class="max-h-[380px]">
+      <ol class="px-1 py-2">
+        <li v-for="activity in activities" :key="activity.id" class="flex gap-3.5 rounded-2xl px-3 py-2.5 sm:px-4">
+          <span :class="cn('flex size-9 shrink-0 items-center justify-center rounded-full', typeMeta[activity.type].bubble)">
+            <component :is="typeMeta[activity.type].icon" class="size-4" />
+          </span>
           <div class="min-w-0 flex-1">
-            <p class="text-sm truncate text-foreground/90">{{ activity.detail }}</p>
-            <p class="text-xs text-muted-foreground mt-0.5">
-              <span class="font-medium text-foreground">{{ activity.session }}</span>
-              <template v-if="activity.group">
-                &nbsp;&middot;&nbsp;{{ activity.group }}
-              </template>
+            <p class="truncate text-[13px] font-medium text-foreground/90">{{ activity.detail }}</p>
+            <p class="mt-0.5 text-xs text-muted-foreground">
+              <span class="font-semibold text-foreground/70">{{ activity.session }}</span>
+              · {{ activity.time }} ago
             </p>
           </div>
-          <span class="text-[11px] text-muted-foreground shrink-0 mt-0.5">{{ activity.time }}</span>
-        </div>
-      </ScrollArea>
-    </CardContent>
-  </Card>
+        </li>
+      </ol>
+    </ScrollArea>
+  </section>
 </template>

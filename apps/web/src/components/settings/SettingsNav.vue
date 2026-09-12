@@ -25,7 +25,7 @@ function handleClick(id: string): void {
 <template>
   <aside class="w-full md:w-64 md:shrink-0 md:sticky md:top-4">
     <nav
-      class="rounded-md border border-border bg-card p-2"
+      class="rounded-[20px] bg-card p-2 shadow-soft"
       aria-label="Settings navigation"
     >
       <ul class="flex flex-col gap-0.5">
@@ -34,10 +34,10 @@ function handleClick(id: string): void {
             type="button"
             :class="
               cn(
-                'flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-design',
+                'flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium transition-design',
                 activeId === section.id
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                  ? 'bg-emerald-500/10 text-foreground'
+                  : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
               )
             "
             @click="handleClick(section.id)"
@@ -47,7 +47,7 @@ function handleClick(id: string): void {
               :class="
                 cn(
                   'size-4 shrink-0 transition-design',
-                  activeId === section.id ? 'text-primary' : 'text-muted-foreground',
+                  activeId === section.id ? 'text-emerald-600 dark:text-emerald-300' : 'text-muted-foreground',
                 )
               "
             />

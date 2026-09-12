@@ -1,22 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Search, Users, UserCheck, Crown, Bot, ArrowUpRight, ArrowDownRight, type LucideIcon } from '@lucide/vue'
-import Card from '@/components/ui/card/Card.vue'
-import CardContent from '@/components/ui/card/CardContent.vue'
-import CardHeader from '@/components/ui/card/CardHeader.vue'
-import CardTitle from '@/components/ui/card/CardTitle.vue'
-import Badge from '@/components/ui/badge/Badge.vue'
-import Input from '@/components/ui/input/Input.vue'
-import Avatar from '@/components/ui/avatar/Avatar.vue'
-import AvatarFallback from '@/components/ui/avatar/AvatarFallback.vue'
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableHead,
-  TableRow,
-  TableCell,
-} from '@/components/ui/table'
+import { Search, Users, UserCheck, Crown, Bot, Brain, type LucideIcon } from '@lucide/vue'
 import { cn } from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -213,11 +197,11 @@ const activeUsers = computed(() => users.value.filter((u) => u.status === 'activ
 const premiumUsers = computed(() => users.value.filter((u) => u.premiumTier !== 'free').length)
 const aiModeUsers = computed(() => users.value.filter((u) => u.aiMode).length)
 
-const statCards = computed<{ label: string; value: number; icon: LucideIcon; change: string; changeType: 'up' | 'down' }[]>(() => [
-  { label: 'Total Users', value: totalUsers.value, icon: Users, change: `${activeUsers.value} active`, changeType: 'up' },
-  { label: 'Active Today', value: activeUsers.value, icon: UserCheck, change: `${Math.round(activeUsers.value / totalUsers.value * 100)}% active rate`, changeType: 'up' },
-  { label: 'Premium Users', value: premiumUsers.value, icon: Crown, change: `${Math.round(premiumUsers.value / totalUsers.value * 100)}% of total`, changeType: 'up' },
-  { label: 'AI Mode Users', value: aiModeUsers.value, icon: Bot, change: `${Math.round(aiModeUsers.value / totalUsers.value * 100)}% of total`, changeType: 'up' },
+const statCards = computed<{ label: string; value: number; icon: LucideIcon; change: string }[]>(() => [
+  { label: 'Total Users', value: totalUsers.value, icon: Users, change: `${activeUsers.value} active` },
+  { label: 'Active Rate', value: Math.round(activeUsers.value / totalUsers.value * 100), icon: UserCheck, change: `${activeUsers.value} of ${totalUsers.value}` },
+  { label: 'Premium', value: premiumUsers.value, icon: Crown, change: `${Math.round(premiumUsers.value / totalUsers.value * 100)}% of total` },
+  { label: 'AI Mode', value: aiModeUsers.value, icon: Bot, change: `${Math.round(aiModeUsers.value / totalUsers.value * 100)}% of total` },
 ])
 
 // ── Search & Filter ────────────────────────────────────────────────
@@ -225,31 +209,28 @@ const searchQuery = ref('')
 const tierFilter = ref<'all' | 'free' | 'premium' | 'pro'>('all')
 const statusFilter = ref<'all' | 'active' | 'inactive'>('all')
 
+const tierOptions = computed(() => {
+  const count = (t: string): number => users.value.filter((u) => t === 'all' || u.premiumTier === t).length
+  return [
+    { key: 'all', label: 'All tiers', count: count('all') },
+    { key: 'free', label: 'Free', count: count('free') },
+    { key: 'premium', label: 'Premium', count: count('premium') },
+    { key: 'pro', label: 'Pro', count: count('pro') },
+  ] as const
+})
+
 const filteredUsers = computed(() => {
-  let result = users.value
-
-  // search
   const q = searchQuery.value.toLowerCase().trim()
-  if (q) {
-    result = result.filter(
-      (u) =>
-        u.pushName.toLowerCase().includes(q) ||
-        u.jid.toLowerCase().includes(q) ||
-        u.session.toLowerCase().includes(q),
-    )
-  }
-
-  // tier filter
-  if (tierFilter.value !== 'all') {
-    result = result.filter((u) => u.premiumTier === tierFilter.value)
-  }
-
-  // status filter
-  if (statusFilter.value !== 'all') {
-    result = result.filter((u) => u.status === statusFilter.value)
-  }
-
-  return result
+  return users.value.filter((u) => {
+    const matchQuery
+      = !q
+        || u.pushName.toLowerCase().includes(q)
+        || u.jid.toLowerCase().includes(q)
+        || u.session.toLowerCase().includes(q)
+    const matchTier = tierFilter.value === 'all' || u.premiumTier === tierFilter.value
+    const matchStatus = statusFilter.value === 'all' || u.status === statusFilter.value
+    return matchQuery && matchTier && matchStatus
+  })
 })
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -275,209 +256,162 @@ function timeAgo(date: Date): string {
   return date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-function formatDate(date: Date): string {
-  return date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })
-}
-
-const tierBadge = (tier: BotUser['premiumTier']): { label: string; variant: 'default' | 'secondary' | 'outline' } => {
-  const map: Record<BotUser['premiumTier'], { label: string; variant: 'default' | 'secondary' | 'outline' }> = {
-    free: { label: 'Free', variant: 'secondary' },
-    premium: { label: 'Premium', variant: 'default' },
-    pro: { label: 'Pro', variant: 'outline' },
+const tierPill = (tier: BotUser['premiumTier']): string => {
+  const map: Record<BotUser['premiumTier'], string> = {
+    free: 'bg-muted text-muted-foreground',
+    premium: 'bg-amber-500/10 text-amber-600 dark:text-amber-300',
+    pro: 'bg-violet-500/10 text-violet-600 dark:text-violet-300',
   }
   return map[tier]
+}
+
+const clearFilters = (): void => {
+  searchQuery.value = ''
+  tierFilter.value = 'all'
+  statusFilter.value = 'all'
 }
 </script>
 
 <template>
-  <div class="space-y-7">
-    <!-- Page Header -->
+  <div class="space-y-6">
+    <!-- Header -->
     <div>
-      <h2 class="text-display text-foreground">Users</h2>
-      <p class="text-body text-muted-foreground mt-1">
-        Users who interact with your WhatsApp bot across all sessions.
+      <p class="text-eyebrow text-muted-foreground">Audience</p>
+      <h2 class="mt-1 text-2xl font-bold tracking-tight">Users</h2>
+      <p class="mt-1 text-sm text-muted-foreground">
+        {{ activeUsers }} of {{ totalUsers }} users active across all sessions.
       </p>
     </div>
 
-    <!-- Stats Cards -->
-    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <Card v-for="stat in statCards" :key="stat.label">
-        <CardContent class="p-5">
-          <div class="flex items-start justify-between">
-            <div class="space-y-1.5">
-              <p class="text-body text-muted-foreground">{{ stat.label }}</p>
-              <p class="text-2xl font-semibold tracking-tight text-foreground">{{ stat.value }}</p>
-            </div>
-            <div class="flex size-10 shrink-0 items-center justify-center rounded-md bg-primary/10">
-              <component :is="stat.icon" class="size-5 text-primary" />
-            </div>
+    <!-- Stats -->
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <article
+        v-for="(stat, i) in statCards"
+        :key="stat.label"
+        :style="{ animationDelay: `${i * 70}ms` }"
+        class="animate-fade-up card-lift group rounded-[24px] bg-card p-5 shadow-soft hover:-translate-y-1 hover:shadow-lift"
+      >
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p class="text-eyebrow text-muted-foreground">{{ stat.label }}</p>
+            <p class="mt-1.5 text-[32px] leading-none font-bold tracking-tight text-foreground">
+              {{ stat.value }}<span v-if="stat.label === 'Active Rate'" class="text-lg text-muted-foreground">%</span>
+            </p>
           </div>
-          <div class="mt-4 flex items-center gap-1.5">
-            <component
-              :is="stat.changeType === 'up' ? ArrowUpRight : ArrowDownRight"
-              :class="cn(
-                'size-3.5',
-                stat.changeType === 'up' && 'text-surface',
-                stat.changeType === 'down' && 'text-destructive',
-              )"
-            />
-            <span
-              :class="cn(
-                'text-xs font-medium',
-                stat.changeType === 'up' && 'text-surface',
-                stat.changeType === 'down' && 'text-destructive',
-              )"
-            >
-              {{ stat.change }}
-            </span>
-          </div>
-        </CardContent>
-      </Card>
+          <span class="flex size-11 items-center justify-center rounded-full bg-primary/[0.07] text-primary transition-design group-hover:scale-105">
+            <component :is="stat.icon" class="size-5" />
+          </span>
+        </div>
+        <div class="mt-3">
+          <span class="inline-flex items-center rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-600 dark:text-emerald-300">
+            {{ stat.change }}
+          </span>
+        </div>
+      </article>
     </div>
 
-    <!-- Filters & Search -->
-    <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-      <div class="relative w-full sm:w-72">
-        <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-        <Input
+    <!-- Search + filters -->
+    <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
+      <div class="relative w-full lg:max-w-xs">
+        <Search class="absolute top-1/2 left-4 size-4 -translate-y-1/2 text-muted-foreground" />
+        <input
           v-model="searchQuery"
-          placeholder="Cari user..."
-          class="pl-8 h-9 text-sm"
+          type="search"
+          placeholder="Search name, number, session…"
+          class="w-full rounded-full bg-card py-2.5 pr-4 pl-11 text-sm shadow-soft outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-emerald-500/40"
         />
       </div>
-      <div class="flex items-center gap-2">
-        <select
-          v-model="tierFilter"
-          class="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer"
+      <div class="flex flex-wrap items-center gap-2">
+        <button
+          v-for="t in tierOptions"
+          :key="t.key"
+          :aria-pressed="tierFilter === t.key"
+          @click="tierFilter = t.key"
+          :class="cn(
+            'inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold transition-design',
+            tierFilter === t.key
+              ? 'bg-foreground text-background'
+              : 'bg-card text-muted-foreground shadow-soft hover:text-foreground',
+          )"
         >
-          <option value="all">All Tiers</option>
-          <option value="free">Free</option>
-          <option value="premium">Premium</option>
-          <option value="pro">Pro</option>
-        </select>
-        <select
-          v-model="statusFilter"
-          class="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer"
+          {{ t.label }}
+          <span :class="cn('tabular-nums', tierFilter === t.key ? 'opacity-70' : 'text-muted-foreground/70')">{{ t.count }}</span>
+        </button>
+        <button
+          v-for="s in (['active', 'inactive'] as const)"
+          :key="s"
+          :aria-pressed="statusFilter === s"
+          @click="statusFilter = statusFilter === s ? 'all' : s"
+          :class="cn(
+            'inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold capitalize transition-design',
+            statusFilter === s
+              ? 'bg-foreground text-background'
+              : 'bg-card text-muted-foreground shadow-soft hover:text-foreground',
+          )"
         >
-          <option value="all">All Status</option>
-          <option value="active">Active</option>
-          <option value="inactive">Inactive</option>
-        </select>
+          <span class="size-1.5 rounded-full" :class="s === 'active' ? 'bg-emerald-500' : 'bg-muted-foreground'" />
+          {{ s }}
+        </button>
       </div>
     </div>
 
-    <!-- Users Table -->
-    <Card>
-      <CardHeader class="flex-row items-center justify-between space-y-0 pb-4">
-        <CardTitle class="text-heading">Bot Users</CardTitle>
-        <span class="text-xs text-muted-foreground">{{ filteredUsers.length }} users</span>
-      </CardHeader>
-      <CardContent class="p-0">
-        <Table>
-          <TableHeader>
-            <TableRow class="hover:bg-transparent">
-              <TableHead class="pl-6">User</TableHead>
-              <TableHead>Session</TableHead>
-              <TableHead>Messages</TableHead>
-              <TableHead>AI Mode</TableHead>
-              <TableHead>Tier</TableHead>
-              <TableHead>Groups</TableHead>
-              <TableHead>Registered</TableHead>
-              <TableHead class="pr-6">Last Active</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            <template v-if="filteredUsers.length === 0">
-              <TableRow>
-                <TableCell colspan="8" class="text-center py-12 text-muted-foreground">
-                  <div class="flex flex-col items-center gap-2">
-                    <Users class="size-8 opacity-40" />
-                    <p class="text-sm">No users found matching your filters.</p>
-                  </div>
-                </TableCell>
-              </TableRow>
-            </template>
-            <TableRow v-for="user in filteredUsers" :key="user.id">
-              <!-- User Info -->
-              <TableCell class="pl-6">
-                <div class="flex items-center gap-3">
-                  <Avatar class="size-9 shrink-0 rounded-full">
-                    <AvatarFallback class="rounded-full text-xs bg-primary/10 text-primary font-semibold">
-                      {{ initials(user.pushName) }}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div class="min-w-0">
-                    <div class="flex items-center gap-2">
-                      <span class="text-sm font-medium text-foreground truncate">
-                        {{ user.pushName }}
-                      </span>
-                      <span
-                        class="size-2 rounded-full shrink-0"
-                        :class="user.status === 'active' ? 'bg-emerald-500' : 'bg-muted-foreground'"
-                      ></span>
-                    </div>
-                    <p class="text-xs text-muted-foreground truncate font-mono">
-                      {{ user.jid.split('@')[0] }}
-                    </p>
-                  </div>
-                </div>
-              </TableCell>
-
-              <!-- Session -->
-              <TableCell>
-                <span class="text-sm text-foreground">{{ user.session }}</span>
-              </TableCell>
-
-              <!-- Messages -->
-              <TableCell class="font-mono text-xs">
-                <span class="text-surface font-medium">{{ user.messagesIn }}</span>
-                <span class="text-muted-foreground"> / </span>
-                <span class="text-primary font-medium">{{ user.messagesOut }}</span>
-              </TableCell>
-
-              <!-- AI Mode -->
-              <TableCell>
-                <Badge
-                  :variant="user.aiMode ? 'default' : 'secondary'"
-                  class="rounded-md text-[10px] px-1.5 py-0"
-                >
-                  {{ user.aiMode ? 'AI' : 'CMD' }}
-                </Badge>
-              </TableCell>
-
-              <!-- Premium Tier -->
-              <TableCell>
-                <Badge
-                  :variant="tierBadge(user.premiumTier).variant"
-                  class="rounded-md text-[10px] px-1.5 py-0"
-                >
-                  {{ tierBadge(user.premiumTier).label }}
-                </Badge>
-              </TableCell>
-
-              <!-- Groups -->
-              <TableCell>
-                <span class="text-sm text-foreground">{{ user.groups }}</span>
-              </TableCell>
-
-              <!-- Registered -->
-              <TableCell class="text-xs text-muted-foreground whitespace-nowrap">
-                {{ formatDate(user.registeredAt) }}
-              </TableCell>
-
-              <!-- Last Active -->
-              <TableCell class="pr-6">
-                <span
-                  class="text-xs"
-                  :class="user.status === 'active' ? 'text-foreground' : 'text-muted-foreground'"
-                >
-                  {{ timeAgo(user.lastActive) }}
-                </span>
-              </TableCell>
-            </TableRow>
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+    <!-- User list -->
+    <section class="rounded-[24px] bg-card px-3 py-6 shadow-soft sm:px-4">
+      <header class="flex items-center justify-between px-3 pb-3 sm:px-4">
+        <h3 class="text-xl font-bold tracking-tight">Bot Users</h3>
+        <span class="text-xs font-semibold text-muted-foreground">{{ filteredUsers.length }} users</span>
+      </header>
+      <ul v-if="filteredUsers.length" class="space-y-1">
+        <li
+          v-for="user in filteredUsers"
+          :key="user.id"
+          class="flex items-center gap-4 rounded-2xl px-3 py-3.5 sm:px-4"
+        >
+          <span class="relative flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/[0.07] text-[13px] font-bold text-primary">
+            {{ initials(user.pushName) }}
+            <span
+              class="absolute -right-0.5 -bottom-0.5 size-3 rounded-full border-2 border-card"
+              :class="user.status === 'active' ? 'bg-emerald-500' : 'bg-muted-foreground/50'"
+            />
+          </span>
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <p class="truncate text-sm font-semibold">{{ user.pushName }}</p>
+              <span :class="cn('rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize', tierPill(user.premiumTier))">
+                {{ user.premiumTier }}
+              </span>
+              <span v-if="user.aiMode" class="inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-2 py-0.5 text-[11px] font-semibold text-violet-600 dark:text-violet-300">
+                <Brain class="size-3" />
+                AI
+              </span>
+            </div>
+            <p class="mt-1 truncate text-xs text-muted-foreground">
+              <span class="font-mono">{{ user.jid.split('@')[0] }}</span>
+              <span aria-hidden="true"> · </span>
+              <span>{{ user.session }}</span>
+              <span aria-hidden="true"> · </span>
+              <span>{{ user.groups }} groups</span>
+            </p>
+          </div>
+          <div class="hidden shrink-0 text-right sm:block">
+            <p class="text-sm font-bold tabular-nums">{{ (user.messagesIn + user.messagesOut).toLocaleString() }}</p>
+            <p class="text-[11px] tabular-nums text-muted-foreground">↓{{ user.messagesIn }} ↑{{ user.messagesOut }}</p>
+          </div>
+          <span class="hidden w-20 shrink-0 text-right text-[11px] text-muted-foreground md:block">
+            {{ timeAgo(user.lastActive) }}
+          </span>
+        </li>
+      </ul>
+      <div v-else class="flex flex-col items-center px-6 py-14 text-center">
+        <span class="flex size-14 items-center justify-center rounded-full bg-muted">
+          <Users class="size-6 text-muted-foreground" />
+        </span>
+        <p class="mt-4 text-base font-bold">No users found</p>
+        <p class="mt-1 max-w-xs text-sm text-muted-foreground">Try a different search term or filter.</p>
+        <button @click="clearFilters" class="mt-5 rounded-full bg-muted px-5 py-2 text-xs font-semibold transition-design hover:text-foreground">
+          Clear filters
+        </button>
+      </div>
+    </section>
   </div>
 </template>

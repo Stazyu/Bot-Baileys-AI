@@ -1,22 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Search, Command, Terminal, ArrowUpRight, ArrowDownRight, Clock, CheckCircle2, XCircle } from '@lucide/vue'
-import Card from '@/components/ui/card/Card.vue'
-import CardContent from '@/components/ui/card/CardContent.vue'
-import CardHeader from '@/components/ui/card/CardHeader.vue'
-import CardTitle from '@/components/ui/card/CardTitle.vue'
-import Badge from '@/components/ui/badge/Badge.vue'
-import Input from '@/components/ui/input/Input.vue'
-import Avatar from '@/components/ui/avatar/Avatar.vue'
-import AvatarFallback from '@/components/ui/avatar/AvatarFallback.vue'
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableHead,
-  TableRow,
-  TableCell,
-} from '@/components/ui/table'
+import { Search, Command, Clock, CheckCircle2, XCircle, Terminal, type LucideIcon } from '@lucide/vue'
 import { cn } from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -367,11 +351,11 @@ const avgResponseTime = computed(() => {
   return Math.round(total / logs.value.length)
 })
 
-const statCards = computed(() => [
-  { label: 'Total Commands', value: totalCommands.value, icon: Command, change: `${successCount.value} succeeded`, changeType: 'up' as const },
-  { label: 'Success Rate', value: `${Math.round(successCount.value / totalCommands.value * 100)}%`, icon: CheckCircle2, change: `${errorCount.value} failed`, changeType: successCount.value > errorCount.value ? 'up' as const : 'down' as const },
-  { label: 'Avg Response', value: `${avgResponseTime.value}ms`, icon: Clock, change: '± 0ms vs yesterday', changeType: 'neutral' as const },
-  { label: 'Errors', value: errorCount.value, icon: XCircle, change: `${errorCount.value} total errors`, changeType: 'down' as const },
+const statCards = computed<{ label: string; value: string | number; icon: LucideIcon; change: string; tone: 'up' | 'down' | 'neutral' }[]>(() => [
+  { label: 'Total Commands', value: totalCommands.value, icon: Command, change: `${successCount.value} succeeded`, tone: 'up' },
+  { label: 'Success Rate', value: `${Math.round(successCount.value / totalCommands.value * 100)}%`, icon: CheckCircle2, change: `${errorCount.value} failed`, tone: errorCount.value > 3 ? 'down' : 'up' },
+  { label: 'Avg Response', value: `${avgResponseTime.value}ms`, icon: Clock, change: 'last 26 executions', tone: 'neutral' },
+  { label: 'Errors', value: errorCount.value, icon: XCircle, change: `${errorCount.value} need attention`, tone: 'down' },
 ])
 
 // ── Search & Filter ────────────────────────────────────────────────
@@ -379,47 +363,29 @@ const searchQuery = ref('')
 const categoryFilter = ref<string>('all')
 const statusFilter = ref<'all' | 'success' | 'error'>('all')
 
-const categories = computed(() => {
-  const cats = new Set(logs.value.map((l) => l.category))
-  return ['all', ...Array.from(cats)]
+const categoryOptions = computed(() => {
+  const count = (c: string): number => logs.value.filter((l) => c === 'all' || l.category === c).length
+  const cats = [...new Set(logs.value.map((l) => l.category))]
+  return [{ key: 'all', label: 'All', count: count('all') }, ...cats.map((c) => ({ key: c, label: categoryLabel[c] ?? c, count: count(c) }))]
 })
 
 const filteredLogs = computed(() => {
-  let result = logs.value
-
   const q = searchQuery.value.toLowerCase().trim()
-  if (q) {
-    result = result.filter(
-      (l) =>
-        l.command.toLowerCase().includes(q) ||
-        l.pushName.toLowerCase().includes(q) ||
-        l.jid.toLowerCase().includes(q) ||
-        l.args.toLowerCase().includes(q) ||
-        l.session.toLowerCase().includes(q),
-    )
-  }
-
-  if (categoryFilter.value !== 'all') {
-    result = result.filter((l) => l.category === categoryFilter.value)
-  }
-
-  if (statusFilter.value !== 'all') {
-    result = result.filter((l) => l.status === statusFilter.value)
-  }
-
-  return result
+  return logs.value.filter((l) => {
+    const matchQuery
+      = !q
+        || l.command.toLowerCase().includes(q)
+        || l.pushName.toLowerCase().includes(q)
+        || l.jid.toLowerCase().includes(q)
+        || l.args.toLowerCase().includes(q)
+        || l.session.toLowerCase().includes(q)
+    const matchCategory = categoryFilter.value === 'all' || l.category === categoryFilter.value
+    const matchStatus = statusFilter.value === 'all' || l.status === statusFilter.value
+    return matchQuery && matchCategory && matchStatus
+  })
 })
 
 // ── Helpers ────────────────────────────────────────────────────────
-function initials(name: string): string {
-  return name
-    .split(' ')
-    .map((w) => w[0] ?? '')
-    .slice(0, 2)
-    .join('')
-    .toUpperCase()
-}
-
 function timeAgo(date: Date): string {
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
@@ -450,223 +416,180 @@ const categoryLabel: Record<string, string> = {
   session: 'Session',
 }
 
-const categoryBadgeVariant = (cat: string): 'default' | 'secondary' | 'outline' => {
-  const map: Record<string, 'default' | 'secondary' | 'outline'> = {
-    basic: 'secondary',
-    media: 'default',
-    group: 'outline',
-    owner: 'secondary',
-    ai: 'default',
-    session: 'outline',
+const categoryPill = (cat: string): string => {
+  const map: Record<string, string> = {
+    basic: 'bg-muted text-muted-foreground',
+    media: 'bg-sky-500/10 text-sky-600 dark:text-sky-300',
+    group: 'bg-amber-500/10 text-amber-600 dark:text-amber-300',
+    owner: 'bg-violet-500/10 text-violet-600 dark:text-violet-300',
+    ai: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300',
+    session: 'bg-slate-500/10 text-slate-500 dark:text-slate-300',
   }
-  return map[cat] ?? 'secondary'
+  return map[cat] ?? 'bg-muted text-muted-foreground'
 }
 
 const responseTimeColor = (ms: number): string => {
-  if (ms < 200) return 'text-surface'
+  if (ms < 200) return 'text-emerald-500'
   if (ms < 2000) return 'text-foreground'
   if (ms < 5000) return 'text-amber-500'
-  return 'text-destructive'
+  return 'text-rose-500'
+}
+
+const clearFilters = (): void => {
+  searchQuery.value = ''
+  categoryFilter.value = 'all'
+  statusFilter.value = 'all'
 }
 </script>
 
 <template>
-  <div class="space-y-7">
-    <!-- Page Header -->
+  <div class="space-y-6">
+    <!-- Header -->
     <div>
-      <h2 class="text-display text-foreground">Command Logs</h2>
-      <p class="text-body text-muted-foreground mt-1">
-        Track every command executed across all bot sessions in real-time.
+      <p class="text-eyebrow text-muted-foreground">Terminal</p>
+      <h2 class="mt-1 text-2xl font-bold tracking-tight">Command Logs</h2>
+      <p class="mt-1 text-sm text-muted-foreground">
+        {{ successCount }} of {{ totalCommands }} commands succeeded · avg {{ avgResponseTime }}ms.
       </p>
     </div>
 
-    <!-- Stats Cards -->
-    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <Card v-for="stat in statCards" :key="stat.label">
-        <CardContent class="p-5">
-          <div class="flex items-start justify-between">
-            <div class="space-y-1.5">
-              <p class="text-body text-muted-foreground">{{ stat.label }}</p>
-              <p class="text-2xl font-semibold tracking-tight text-foreground">{{ stat.value }}</p>
-            </div>
-            <div class="flex size-10 shrink-0 items-center justify-center rounded-md bg-primary/10">
-              <component :is="stat.icon" class="size-5 text-primary" />
-            </div>
+    <!-- Stats -->
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <article
+        v-for="(stat, i) in statCards"
+        :key="stat.label"
+        :style="{ animationDelay: `${i * 70}ms` }"
+        class="animate-fade-up card-lift group rounded-[24px] bg-card p-5 shadow-soft hover:-translate-y-1 hover:shadow-lift"
+      >
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p class="text-eyebrow text-muted-foreground">{{ stat.label }}</p>
+            <p class="mt-1.5 text-[32px] leading-none font-bold tracking-tight text-foreground">{{ stat.value }}</p>
           </div>
-          <div class="mt-4 flex items-center gap-1.5">
-            <component
-              :is="stat.changeType === 'up' ? ArrowUpRight : stat.changeType === 'down' ? ArrowDownRight : null"
-              v-if="stat.changeType !== 'neutral'"
-              :class="cn(
-                'size-3.5',
-                stat.changeType === 'up' && 'text-surface',
-                stat.changeType === 'down' && 'text-destructive',
-              )"
-            />
-            <span
-              :class="cn(
-                'text-xs font-medium',
-                stat.changeType === 'up' && 'text-surface',
-                stat.changeType === 'down' && 'text-destructive',
-                stat.changeType === 'neutral' && 'text-muted-foreground',
-              )"
-            >
-              {{ stat.change }}
-            </span>
-          </div>
-        </CardContent>
-      </Card>
+          <span class="flex size-11 items-center justify-center rounded-full bg-primary/[0.07] text-primary transition-design group-hover:scale-105">
+            <component :is="stat.icon" class="size-5" />
+          </span>
+        </div>
+        <div class="mt-3">
+          <span
+            :class="cn(
+              'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold',
+              stat.tone === 'up' && 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300',
+              stat.tone === 'down' && 'bg-rose-500/10 text-rose-600 dark:text-rose-300',
+              stat.tone === 'neutral' && 'bg-muted text-muted-foreground',
+            )"
+          >
+            {{ stat.change }}
+          </span>
+        </div>
+      </article>
     </div>
 
-    <!-- Filters & Search -->
-    <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-      <div class="relative w-full sm:w-72">
-        <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-        <Input
+    <!-- Search + filters -->
+    <div class="flex flex-col gap-3 xl:flex-row xl:items-center">
+      <div class="relative w-full xl:max-w-xs">
+        <Search class="absolute top-1/2 left-4 size-4 -translate-y-1/2 text-muted-foreground" />
+        <input
           v-model="searchQuery"
-          placeholder="Cari command, user, args..."
-          class="pl-8 h-9 text-sm"
+          type="search"
+          placeholder="Search command, user, args…"
+          class="w-full rounded-full bg-card py-2.5 pr-4 pl-11 text-sm shadow-soft outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-emerald-500/40"
         />
       </div>
-      <div class="flex items-center gap-2">
-        <select
-          v-model="categoryFilter"
-          class="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer"
+      <div class="flex flex-wrap items-center gap-2">
+        <button
+          v-for="c in categoryOptions"
+          :key="c.key"
+          :aria-pressed="categoryFilter === c.key"
+          @click="categoryFilter = c.key"
+          :class="cn(
+            'inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold capitalize transition-design',
+            categoryFilter === c.key
+              ? 'bg-foreground text-background'
+              : 'bg-card text-muted-foreground shadow-soft hover:text-foreground',
+          )"
         >
-          <option value="all">All Categories</option>
-          <option v-for="cat in categories.filter((c) => c !== 'all')" :key="cat" :value="cat">
-            {{ categoryLabel[cat] ?? cat }}
-          </option>
-        </select>
-        <select
-          v-model="statusFilter"
-          class="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer"
+          {{ c.label }}
+          <span :class="cn('tabular-nums', categoryFilter === c.key ? 'opacity-70' : 'text-muted-foreground/70')">{{ c.count }}</span>
+        </button>
+        <button
+          :aria-pressed="statusFilter === 'error'"
+          @click="statusFilter = statusFilter === 'error' ? 'all' : 'error'"
+          :class="cn(
+            'inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold transition-design',
+            statusFilter === 'error'
+              ? 'bg-rose-500 text-white'
+              : 'bg-card text-muted-foreground shadow-soft hover:text-foreground',
+          )"
         >
-          <option value="all">All Status</option>
-          <option value="success">Success</option>
-          <option value="error">Error</option>
-        </select>
+          <span class="size-1.5 rounded-full bg-current" />
+          Errors only
+        </button>
       </div>
     </div>
 
-    <!-- Command Logs Table -->
-    <Card>
-      <CardHeader class="flex-row items-center justify-between space-y-0 pb-4">
-        <CardTitle class="text-heading">Command Execution Log</CardTitle>
-        <span class="text-xs text-muted-foreground">{{ filteredLogs.length }} entries</span>
-      </CardHeader>
-      <CardContent class="p-0">
-        <Table>
-          <TableHeader>
-            <TableRow class="hover:bg-transparent">
-              <TableHead class="pl-6">Time</TableHead>
-              <TableHead>User</TableHead>
-              <TableHead>Session</TableHead>
-              <TableHead>Command</TableHead>
-              <TableHead>Arguments</TableHead>
-              <TableHead>Category</TableHead>
-              <TableHead>Response</TableHead>
-              <TableHead class="pr-6">Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            <template v-if="filteredLogs.length === 0">
-              <TableRow>
-                <TableCell colspan="8" class="text-center py-12 text-muted-foreground">
-                  <div class="flex flex-col items-center gap-2">
-                    <Terminal class="size-8 opacity-40" />
-                    <p class="text-sm">No command logs found matching your filters.</p>
-                  </div>
-                </TableCell>
-              </TableRow>
-            </template>
-            <TableRow v-for="log in filteredLogs" :key="log.id">
-              <!-- Time -->
-              <TableCell class="pl-6">
-                <div class="flex flex-col">
-                  <span class="text-xs font-medium text-foreground whitespace-nowrap">{{ formatTime(log.timestamp) }}</span>
-                  <span class="text-[10px] text-muted-foreground whitespace-nowrap">{{ timeAgo(log.timestamp) }}</span>
-                </div>
-              </TableCell>
-
-              <!-- User -->
-              <TableCell>
-                <div class="flex items-center gap-2.5">
-                  <Avatar class="size-8 shrink-0 rounded-full">
-                    <AvatarFallback class="rounded-full text-[10px] bg-primary/10 text-primary font-semibold">
-                      {{ initials(log.pushName) }}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div class="min-w-0">
-                    <span class="text-sm font-medium text-foreground truncate block">
-                      {{ log.pushName }}
-                    </span>
-                    <span class="text-[10px] text-muted-foreground font-mono">
-                      {{ log.jid.split('@')[0] }}
-                    </span>
-                  </div>
-                </div>
-              </TableCell>
-
-              <!-- Session -->
-              <TableCell>
-                <span class="text-xs text-foreground">{{ log.session }}</span>
-              </TableCell>
-
-              <!-- Command -->
-              <TableCell>
-                <code class="text-xs font-mono font-semibold text-primary bg-primary/5 px-1.5 py-0.5 rounded">
-                  {{ log.command }}
-                </code>
-              </TableCell>
-
-              <!-- Arguments -->
-              <TableCell class="max-w-[180px]">
-                <span v-if="log.args" class="text-xs text-muted-foreground truncate block">
-                  {{ log.args }}
-                </span>
-                <span v-else class="text-xs text-muted-foreground/50 italic">—</span>
-              </TableCell>
-
-              <!-- Category -->
-              <TableCell>
-                <Badge
-                  :variant="categoryBadgeVariant(log.category)"
-                  class="rounded-md text-[10px] px-1.5 py-0"
-                >
-                  {{ categoryLabel[log.category] ?? log.category }}
-                </Badge>
-              </TableCell>
-
-              <!-- Response Time -->
-              <TableCell>
-                <span class="text-xs font-mono font-medium" :class="responseTimeColor(log.responseTime)">
-                  {{ formatResponseTime(log.responseTime) }}
-                </span>
-              </TableCell>
-
-              <!-- Status -->
-              <TableCell class="pr-6">
-                <div class="flex items-center gap-1.5">
-                  <span
-                    class="size-2 rounded-full shrink-0"
-                    :class="log.status === 'success' ? 'bg-emerald-500' : 'bg-destructive'"
-                  ></span>
-                  <span class="text-xs" :class="log.status === 'success' ? 'text-emerald-500' : 'text-destructive'">
-                    {{ log.status === 'success' ? 'OK' : 'ERR' }}
-                  </span>
-                </div>
-                <p v-if="log.errorMessage" class="text-[10px] text-destructive/80 mt-0.5 truncate max-w-[120px]" :title="log.errorMessage">
-                  {{ log.errorMessage }}
-                </p>
-                <p v-if="log.groupName" class="text-[10px] text-muted-foreground mt-0.5">
-                  {{ log.groupName }}
-                </p>
-              </TableCell>
-            </TableRow>
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+    <!-- Execution feed -->
+    <section class="rounded-[24px] bg-card px-3 py-6 shadow-soft sm:px-4">
+      <header class="flex items-center justify-between px-3 pb-3 sm:px-4">
+        <h3 class="flex items-center gap-2 text-xl font-bold tracking-tight">
+          <Terminal class="size-5 text-muted-foreground" />
+          Execution Log
+        </h3>
+        <span class="text-xs font-semibold text-muted-foreground">{{ filteredLogs.length }} entries</span>
+      </header>
+      <ul v-if="filteredLogs.length" class="space-y-1">
+        <li
+          v-for="log in filteredLogs"
+          :key="log.id"
+          class="flex items-start gap-3.5 rounded-2xl px-3 py-3 sm:px-4"
+        >
+          <span
+            class="mt-1.5 size-2 shrink-0 rounded-full"
+            :class="log.status === 'success' ? 'bg-emerald-500' : 'bg-rose-500'"
+          />
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <code
+                class="rounded-full px-2.5 py-0.5 font-mono text-xs font-bold"
+                :class="log.status === 'success'
+                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
+                  : 'bg-rose-500/10 text-rose-600 dark:text-rose-300'"
+              >
+                {{ log.command }}
+              </code>
+              <span v-if="log.args" class="truncate font-mono text-xs text-muted-foreground">{{ log.args }}</span>
+              <span :class="cn('rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize', categoryPill(log.category))">
+                {{ categoryLabel[log.category] ?? log.category }}
+              </span>
+            </div>
+            <p class="mt-1 truncate text-xs text-muted-foreground">
+              <span class="font-semibold text-foreground/70">{{ log.pushName }}</span>
+              <span aria-hidden="true"> · </span>
+              <span>{{ log.session }}</span>
+              <span v-if="log.groupName" aria-hidden="true"> · {{ log.groupName }}</span>
+            </p>
+            <p v-if="log.errorMessage" class="mt-0.5 truncate text-xs text-rose-500/90">
+              {{ log.errorMessage }}
+            </p>
+          </div>
+          <div class="hidden shrink-0 text-right sm:block">
+            <p class="font-mono text-xs font-bold tabular-nums" :class="responseTimeColor(log.responseTime)">
+              {{ formatResponseTime(log.responseTime) }}
+            </p>
+            <p class="mt-0.5 text-[11px] tabular-nums text-muted-foreground">{{ timeAgo(log.timestamp) }} · {{ formatTime(log.timestamp) }}</p>
+          </div>
+        </li>
+      </ul>
+      <div v-else class="flex flex-col items-center px-6 py-14 text-center">
+        <span class="flex size-14 items-center justify-center rounded-full bg-muted">
+          <Terminal class="size-6 text-muted-foreground" />
+        </span>
+        <p class="mt-4 text-base font-bold">No executions found</p>
+        <p class="mt-1 max-w-xs text-sm text-muted-foreground">Try a different search term or filter.</p>
+        <button @click="clearFilters" class="mt-5 rounded-full bg-muted px-5 py-2 text-xs font-semibold transition-design hover:text-foreground">
+          Clear filters
+        </button>
+      </div>
+    </section>
   </div>
 </template>

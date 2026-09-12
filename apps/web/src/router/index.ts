@@ -16,7 +16,7 @@ const router = createRouter({
         {
           path: 'sessions',
           name: 'sessions',
-          component: () => import('@/views/PlaceholderView.vue'),
+          component: () => import('@/views/SessionsView.vue'),
         },
         {
           path: 'users',

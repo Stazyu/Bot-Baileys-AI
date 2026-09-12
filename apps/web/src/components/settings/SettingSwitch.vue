@@ -24,7 +24,7 @@ function toggle(): void {
   <label
     :class="
       cn(
-        'flex items-start justify-between gap-4 rounded-lg border bg-card px-4 py-3.5 transition-colors',
+        'flex items-start justify-between gap-4 rounded-2xl bg-muted/50 px-4 py-3.5 transition-design',
         props.disabled
           ? 'cursor-not-allowed opacity-60'
           : 'cursor-pointer hover:bg-accent/40',
@@ -47,7 +47,7 @@ function toggle(): void {
       :class="
         cn(
           'relative mt-0.5 inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50',
-          props.modelValue ? 'bg-primary' : 'bg-input',
+          props.modelValue ? 'bg-emerald-500' : 'bg-muted-foreground/30',
         )
       "
       @click="toggle"

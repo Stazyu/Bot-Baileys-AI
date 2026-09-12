@@ -1,15 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { MessageSquareText, Search, Send, ChevronLeft } from '@lucide/vue'
-import Card from '@/components/ui/card/Card.vue'
-import CardHeader from '@/components/ui/card/CardHeader.vue'
-import CardTitle from '@/components/ui/card/CardTitle.vue'
-import CardContent from '@/components/ui/card/CardContent.vue'
-import Badge from '@/components/ui/badge/Badge.vue'
-import Input from '@/components/ui/input/Input.vue'
-import Button from '@/components/ui/button/Button.vue'
-import Avatar from '@/components/ui/avatar/Avatar.vue'
-import AvatarFallback from '@/components/ui/avatar/AvatarFallback.vue'
+import { Brain, MessageSquareText, Search, Send, ChevronLeft } from '@lucide/vue'
+import { cn } from '@/lib/utils'
 import ScrollArea from '@/components/ui/scroll-area/ScrollArea.vue'
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -203,148 +195,158 @@ function onReplyKeydown(e: KeyboardEvent) {
     sendReply()
   }
 }
+
+function autoresize(e: Event) {
+  const t = e.target as HTMLTextAreaElement
+  t.style.height = 'auto'
+  t.style.height = `${Math.min(t.scrollHeight, 128)}px`
+}
 </script>
 
 <template>
-  <div class="space-y-5">
-    <!-- Page Header -->
-    <div class="flex items-center justify-between">
+  <div class="space-y-6">
+    <!-- Header -->
+    <div class="flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h2 class="text-display text-foreground">Chat Logs</h2>
-        <p class="text-body text-muted-foreground mt-1">
-          Conversations between users and the bot — view messages and reply from the dashboard.
+        <p class="text-eyebrow text-muted-foreground">Inbox</p>
+        <h2 class="mt-1 text-2xl font-bold tracking-tight">Chat Logs</h2>
+        <p class="mt-1 text-sm text-muted-foreground">
+          Conversations between users and the bot — view and reply.
         </p>
       </div>
-      <Badge v-if="totalUnread > 0" variant="default" class="text-xs rounded-md">
+      <span
+        v-if="totalUnread > 0"
+        class="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3.5 py-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-300"
+      >
+        <span class="size-1.5 rounded-full bg-emerald-500" />
         {{ totalUnread }} unread
-      </Badge>
+      </span>
     </div>
 
     <!-- Chat Layout: Conversation List + Thread -->
-    <div class="grid grid-cols-1 lg:grid-cols-12 gap-0 rounded-md border border-border bg-card overflow-hidden" style="min-height: 620px; max-height: calc(100vh - 200px);">
+    <div class="grid grid-cols-1 gap-4 lg:grid-cols-12">
       <!-- LEFT: Conversation List -->
-      <div
-        class="lg:col-span-4 xl:col-span-3 border-r border-border flex flex-col"
-        :class="{ 'hidden lg:flex': selectedConvId, 'flex': !selectedConvId }"
+      <section
+        class="flex flex-col rounded-[24px] bg-card p-3 shadow-soft lg:col-span-4 xl:col-span-4"
+        :class="selectedConvId ? 'hidden lg:flex' : 'flex'"
+        style="min-height: 620px; max-height: calc(100vh - 220px);"
       >
-        <!-- Search -->
-        <div class="p-3 border-b border-border">
-          <div class="relative">
-            <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-            <Input
-              v-model="searchQuery"
-              placeholder="Cari percakapan..."
-              class="pl-8 h-9 text-sm"
-            />
-          </div>
+        <div class="relative px-1 pt-1 pb-3">
+          <Search class="absolute top-1/2 left-4 size-4 -translate-y-[calc(50%+6px)] text-muted-foreground" />
+          <input
+            v-model="searchQuery"
+            type="search"
+            placeholder="Cari percakapan…"
+            class="w-full rounded-full bg-muted/60 py-2.5 pr-4 pl-11 text-sm outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-emerald-500/40"
+          />
         </div>
-
-        <!-- Conversation Items -->
-        <ScrollArea class="flex-1">
+        <ScrollArea class="min-h-0 flex-1">
           <div v-if="filteredConversations.length === 0" class="flex flex-col items-center justify-center py-16 text-muted-foreground">
             <MessageSquareText class="size-10 mb-3 opacity-40" />
             <p class="text-sm">Tidak ada percakapan</p>
           </div>
-
-          <div
-            v-for="conv in filteredConversations"
-            :key="conv.id"
-            class="flex items-start gap-3 px-4 py-3 cursor-pointer border-b border-border/50 hover:bg-muted/50 transition-design"
-            :class="{ 'bg-muted/70': selectedConvId === conv.id }"
-            @click="selectConversation(conv.id)"
-          >
-            <Avatar class="size-10 shrink-0 rounded-full">
-              <AvatarFallback class="rounded-full text-xs bg-primary/10 text-primary font-semibold">
+          <ul class="space-y-1 pb-1">
+            <li
+              v-for="conv in filteredConversations"
+              :key="conv.id"
+              @click="selectConversation(conv.id)"
+              :class="cn(
+                'flex cursor-pointer items-start gap-3 rounded-2xl px-3 py-3 transition-design',
+                selectedConvId === conv.id ? 'bg-muted' : 'hover:bg-muted/60',
+              )"
+            >
+              <span class="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/[0.07] text-xs font-bold text-primary">
                 {{ initials(conv.pushName) }}
-              </AvatarFallback>
-            </Avatar>
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center justify-between gap-2">
-                <span class="text-sm font-medium text-foreground truncate">{{ conv.pushName }}</span>
-                <span class="text-[11px] text-muted-foreground shrink-0">{{ formatTime(conv.lastMessageAt) }}</span>
+              </span>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="truncate text-sm font-semibold">{{ conv.pushName }}</span>
+                  <span class="shrink-0 text-[11px] tabular-nums text-muted-foreground">{{ formatTime(conv.lastMessageAt) }}</span>
+                </div>
+                <div class="mt-0.5 flex items-center justify-between gap-2">
+                  <span class="truncate text-xs text-muted-foreground">{{ conv.lastMessage }}</span>
+                  <span v-if="conv.unread > 0" class="flex size-5 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-[10px] font-bold text-white tabular-nums">
+                    {{ conv.unread }}
+                  </span>
+                </div>
+                <div class="mt-1.5 flex items-center gap-1.5">
+                  <span v-if="conv.aiMode" class="inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-2 py-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-300">
+                    <Brain class="size-2.5" />
+                    AI
+                  </span>
+                  <span class="text-[10px] text-muted-foreground">{{ conv.sessionId }}</span>
+                </div>
               </div>
-              <div class="flex items-center justify-between gap-2 mt-0.5">
-                <span class="text-xs text-muted-foreground truncate">{{ conv.lastMessage }}</span>
-                <Badge v-if="conv.unread > 0" variant="default" class="text-[10px] px-1.5 py-0 shrink-0 rounded-sm">
-                  {{ conv.unread }}
-                </Badge>
-              </div>
-              <div class="flex items-center gap-1.5 mt-1">
-                <Badge :variant="conv.aiMode ? 'default' : 'secondary'" class="text-[10px] px-1.5 py-0 rounded-sm">
-                  {{ conv.aiMode ? 'AI' : 'CMD' }}
-                </Badge>
-                <span class="text-[10px] text-muted-foreground">{{ conv.sessionId }}</span>
-              </div>
-            </div>
-          </div>
+            </li>
+          </ul>
         </ScrollArea>
-      </div>
+      </section>
 
       <!-- RIGHT: Chat Thread -->
-      <div
-        class="lg:col-span-8 xl:col-span-9 flex flex-col"
-        :class="{ 'hidden lg:flex': !selectedConvId, 'flex': selectedConvId }"
+      <section
+        class="flex-col rounded-[24px] bg-card p-4 shadow-soft sm:p-5 lg:col-span-8 xl:col-span-8"
+        :class="selectedConvId ? 'flex' : 'hidden lg:flex'"
+        style="min-height: 620px; max-height: calc(100vh - 220px);"
       >
         <!-- Empty State -->
-        <template v-if="!selectedConv">
-          <div class="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-3">
-            <div class="flex size-16 items-center justify-center rounded-full bg-muted">
-              <MessageSquareText class="size-8 opacity-40" />
-            </div>
-            <p class="text-sm font-medium">Pilih percakapan</p>
-            <p class="text-xs">Klik salah satu chat di panel kiri untuk melihat pesan.</p>
-          </div>
-        </template>
+        <div v-if="!selectedConv" class="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
+          <span class="flex size-16 items-center justify-center rounded-full bg-muted">
+            <MessageSquareText class="size-8 opacity-40" />
+          </span>
+          <p class="text-sm font-semibold text-foreground">Pilih percakapan</p>
+          <p class="text-xs">Klik salah satu chat di panel kiri untuk melihat pesan.</p>
+        </div>
 
         <!-- Thread with messages -->
         <template v-else>
           <!-- Thread Header -->
-          <div class="flex items-center gap-3 px-4 py-3 border-b border-border shrink-0">
+          <div class="flex items-center gap-3 pb-4">
             <button
-              class="lg:hidden flex items-center justify-center size-8 rounded-md hover:bg-muted transition-design -ml-1"
+              class="flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-design hover:bg-muted hover:text-foreground lg:hidden"
               @click="selectedConvId = null"
+              aria-label="Back to conversations"
             >
               <ChevronLeft class="size-5" />
             </button>
-            <Avatar class="size-9 shrink-0 rounded-full">
-              <AvatarFallback class="rounded-full text-xs bg-primary/10 text-primary font-semibold">
-                {{ initials(selectedConv.pushName) }}
-              </AvatarFallback>
-            </Avatar>
+            <span class="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/[0.07] text-xs font-bold text-primary">
+              {{ initials(selectedConv.pushName) }}
+            </span>
             <div class="min-w-0 flex-1">
-              <p class="text-sm font-medium text-foreground truncate">{{ selectedConv.pushName }}</p>
-              <p class="text-xs text-muted-foreground">{{ selectedConv.userJid }}</p>
+              <p class="truncate text-sm font-bold">{{ selectedConv.pushName }}</p>
+              <p class="truncate font-mono text-[11px] text-muted-foreground">{{ selectedConv.userJid }}</p>
             </div>
-            <Badge :variant="selectedConv.aiMode ? 'default' : 'secondary'" class="text-[10px] px-1.5 py-0 shrink-0 rounded-sm">
-              {{ selectedConv.aiMode ? 'AI Mode' : 'CMD' }}
-            </Badge>
+            <span v-if="selectedConv.aiMode" class="inline-flex shrink-0 items-center gap-1 rounded-full bg-violet-500/10 px-2.5 py-1 text-[11px] font-semibold text-violet-600 dark:text-violet-300">
+              <Brain class="size-3" />
+              AI Mode
+            </span>
           </div>
 
           <!-- Messages -->
-          <ScrollArea class="flex-1">
-            <div class="flex flex-col gap-1 p-4">
+          <ScrollArea class="min-h-0 flex-1">
+            <div class="flex flex-col gap-1.5 px-1 py-2">
               <div
                 v-for="msg in selectedConv.messages"
                 :key="msg.id"
-                class="flex gap-3 max-w-[80%]"
+                class="flex max-w-[80%] gap-2.5"
                 :class="msg.fromMe ? 'self-end flex-row-reverse' : 'self-start'"
               >
-                <Avatar class="size-7 shrink-0 rounded-full mt-1">
-                  <AvatarFallback class="rounded-full text-[10px]" :class="msg.fromMe ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground'">
-                    {{ msg.fromMe ? 'BT' : initials(msg.pushName) }}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
+                <span
+                  class="mt-1 flex size-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
+                  :class="msg.fromMe ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300' : 'bg-muted text-muted-foreground'"
+                >
+                  {{ msg.fromMe ? 'BT' : initials(msg.pushName) }}
+                </span>
+                <div class="min-w-0">
                   <div
-                    class="rounded-2xl px-3.5 py-2 text-sm leading-relaxed"
+                    class="px-4 py-2.5 text-sm leading-relaxed"
                     :class="msg.fromMe
-                      ? 'bg-primary text-primary-foreground rounded-tr-md'
-                      : 'bg-muted rounded-tl-md'"
+                      ? 'rounded-[20px] rounded-tr-lg bg-emerald-500 text-white'
+                      : 'rounded-[20px] rounded-tl-lg bg-muted'"
                   >
                     {{ msg.body }}
                   </div>
-                  <div class="flex items-center gap-2 mt-1" :class="msg.fromMe ? 'justify-end' : 'justify-start'">
-                    <span class="text-[10px] text-muted-foreground">{{ formatMessageTime(msg.timestamp) }}</span>
+                  <div class="mt-1 flex items-center gap-2" :class="msg.fromMe ? 'justify-end' : 'justify-start'">
+                    <span class="text-[10px] tabular-nums text-muted-foreground">{{ formatMessageTime(msg.timestamp) }}</span>
                   </div>
                 </div>
               </div>
@@ -352,32 +354,28 @@ function onReplyKeydown(e: KeyboardEvent) {
           </ScrollArea>
 
           <!-- Reply Input -->
-          <div class="border-t border-border p-3 shrink-0">
-            <div class="flex items-end gap-2">
+          <div class="pt-3">
+            <div class="flex items-end gap-2 rounded-[24px] bg-muted/60 p-2 pl-4">
               <textarea
                 v-model="replyText"
-                placeholder="Ketik balasan..."
+                placeholder="Ketik balasan…"
                 rows="1"
-                class="flex-1 min-h-10 max-h-32 resize-none rounded-md border border-input bg-background px-3 py-2.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-50"
+                class="max-h-32 min-h-10 flex-1 resize-none bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50"
                 @keydown="onReplyKeydown"
-                @input="(e: Event) => {
-                  const t = e.target as HTMLTextAreaElement
-                  t.style.height = 'auto'
-                  t.style.height = Math.min(t.scrollHeight, 128) + 'px'
-                }"
+                @input="autoresize"
               />
-              <Button
-                size="icon"
-                class="size-10 shrink-0 rounded-md"
+              <button
                 :disabled="!replyText.trim() || isSending"
                 @click="sendReply"
+                aria-label="Send reply"
+                class="flex size-10 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white transition-design hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Send class="size-4" :class="{ 'animate-pulse': isSending }" />
-              </Button>
+              </button>
             </div>
-            <p class="text-[10px] text-muted-foreground mt-1.5 ml-1">
+            <p class="mt-2 ml-2 text-[11px] text-muted-foreground">
               <template v-if="selectedConv.aiMode">
-                Balasan dikirim sebagai bot melalui AI mode - user akan menerima pesan dari nomor WA.
+                Balasan dikirim sebagai bot — user menerima pesan dari nomor WA.
               </template>
               <template v-else>
                 User ini tidak dalam AI mode. Balasan hanya simulasi.
@@ -385,7 +383,7 @@ function onReplyKeydown(e: KeyboardEvent) {
             </p>
           </div>
         </template>
-      </div>
+      </section>
     </div>
   </div>
 </template>

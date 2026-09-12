@@ -24,8 +24,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from '@/components/ui/sidebar'
-import Avatar from '@/components/ui/avatar/Avatar.vue'
-import AvatarFallback from '@/components/ui/avatar/AvatarFallback.vue'
+import { cn } from '@/lib/utils'
 
 interface NavItem {
   title: string
@@ -55,22 +54,39 @@ const isActive = (itemRoute: string): boolean => {
   if (itemRoute === '/') return route.path === '/'
   return route.path.startsWith(itemRoute)
 }
+
+const itemClass = (itemRoute: string): string =>
+  cn(
+    'rounded-2xl px-3 py-2.5 font-medium transition-design',
+    isActive(itemRoute)
+      ? 'bg-emerald-500/10 text-foreground hover:bg-emerald-500/15 hover:text-foreground'
+      : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+  )
+
+const iconClass = (itemRoute: string): string =>
+  cn('size-[18px]', isActive(itemRoute) ? 'text-emerald-600 dark:text-emerald-300' : 'text-muted-foreground')
+
+const groups: { label: string; items: NavItem[] }[] = [
+  { label: 'Monitoring', items: mainItems },
+  { label: 'Tools', items: toolsItems },
+  { label: 'System', items: systemItems },
+]
 </script>
 
 <template>
-  <Sidebar collapsible="icon" variant="sidebar">
-    <!-- Header -->
-    <SidebarHeader>
+  <Sidebar collapsible="icon" variant="inset">
+    <!-- Brand -->
+    <SidebarHeader class="px-3 pt-3">
       <SidebarMenu>
         <SidebarMenuItem>
-          <SidebarMenuButton size="lg" as-child>
+          <SidebarMenuButton size="lg" as-child class="rounded-2xl px-2 py-2 hover:bg-muted/60">
             <RouterLink to="/">
-              <div class="flex aspect-square size-8 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
+              <div class="flex aspect-square size-9 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-600 text-white">
                 <Bot class="size-4" />
               </div>
-              <div class="grid flex-1 text-left text-sm leading-tight">
-                <span class="truncate font-semibold">Bot-Baileys-AI</span>
-                <span class="truncate text-xs text-muted-foreground">Dashboard</span>
+              <div class="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
+                <span class="truncate font-bold tracking-tight">Bot-Baileys-AI</span>
+                <span class="truncate text-xs text-muted-foreground">Control center</span>
               </div>
             </RouterLink>
           </SidebarMenuButton>
@@ -78,49 +94,24 @@ const isActive = (itemRoute: string): boolean => {
       </SidebarMenu>
     </SidebarHeader>
 
-    <!-- Main Nav -->
-    <SidebarContent>
-      <SidebarGroup>
-        <SidebarGroupLabel>Monitoring</SidebarGroupLabel>
+    <!-- Nav -->
+    <SidebarContent class="gap-6 px-3">
+      <SidebarGroup v-for="group in groups" :key="group.label" class="p-0">
+        <SidebarGroupLabel class="px-3 pb-1.5 text-[11px] font-bold tracking-[0.14em] text-muted-foreground/70 uppercase">
+          {{ group.label }}
+        </SidebarGroupLabel>
         <SidebarGroupContent>
-          <SidebarMenu>
-            <SidebarMenuItem v-for="item in mainItems" :key="item.title">
-              <SidebarMenuButton as-child :is-active="isActive(item.route)" :tooltip="item.title">
+          <SidebarMenu class="gap-1">
+            <SidebarMenuItem v-for="item in group.items" :key="item.title">
+              <SidebarMenuButton as-child :is-active="isActive(item.route)" :tooltip="item.title" :class="itemClass(item.route)">
                 <RouterLink :to="item.route">
-                  <component :is="item.icon" />
+                  <component :is="item.icon" :class="iconClass(item.route)" />
                   <span>{{ item.title }}</span>
-                </RouterLink>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarGroupContent>
-      </SidebarGroup>
-
-      <SidebarGroup>
-        <SidebarGroupLabel>Tools</SidebarGroupLabel>
-        <SidebarGroupContent>
-          <SidebarMenu>
-            <SidebarMenuItem v-for="item in toolsItems" :key="item.title">
-              <SidebarMenuButton as-child :is-active="isActive(item.route)" :tooltip="item.title">
-                <RouterLink :to="item.route">
-                  <component :is="item.icon" />
-                  <span>{{ item.title }}</span>
-                </RouterLink>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarGroupContent>
-      </SidebarGroup>
-
-      <SidebarGroup>
-        <SidebarGroupLabel>System</SidebarGroupLabel>
-        <SidebarGroupContent>
-          <SidebarMenu>
-            <SidebarMenuItem v-for="item in systemItems" :key="item.title">
-              <SidebarMenuButton as-child :is-active="isActive(item.route)" :tooltip="item.title">
-                <RouterLink :to="item.route">
-                  <component :is="item.icon" />
-                  <span>{{ item.title }}</span>
+                  <span
+                    v-if="isActive(item.route)"
+                    aria-hidden="true"
+                    class="ml-auto size-1.5 shrink-0 rounded-full bg-emerald-500 group-data-[collapsible=icon]:hidden"
+                  />
                 </RouterLink>
               </SidebarMenuButton>
             </SidebarMenuItem>
@@ -129,23 +120,17 @@ const isActive = (itemRoute: string): boolean => {
       </SidebarGroup>
     </SidebarContent>
 
-    <!-- Footer -->
-    <SidebarFooter class="border-t border-border">
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton size="sm" as-child>
-            <div class="flex items-center gap-2">
-              <Avatar class="size-6 rounded-md">
-                <AvatarFallback class="rounded-md text-[10px] bg-surface/10 text-surface">WA</AvatarFallback>
-              </Avatar>
-              <div class="grid flex-1 text-left text-sm leading-tight">
-                <span class="truncate font-medium">Bot Online</span>
-                <span class="truncate text-xs text-muted-foreground">v2.0.0</span>
-              </div>
-            </div>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      </SidebarMenu>
+    <!-- Operator -->
+    <SidebarFooter class="p-3">
+      <div class="flex items-center gap-2.5 rounded-2xl bg-muted/50 px-3 py-2.5 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:px-0">
+        <span class="flex size-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 text-xs font-bold text-white">
+          W
+        </span>
+        <div class="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
+          <span class="truncate text-[13px] font-semibold">Wahyu</span>
+          <span class="truncate text-[11px] text-muted-foreground">Admin · v2.0.0</span>
+        </div>
+      </div>
     </SidebarFooter>
 
     <SidebarRail />
