@@ -3,9 +3,8 @@
 # Coolify (cara pakai):
 #   1. Deploy resource ini sebagai "Docker Compose".
 #   2. JANGAN bind host-port manual — Coolify routing via domain per service
-#      (tambah domain di dashboard): `web` → container port 4173
-#      (vite preview, tanpa nginx — Traefik yang proxy), `bot` → container
-#      port 3001. Itu sebabnya pakai `expose`, bukan `ports`.
+#      (tambah domain di dashboard): `web` → container port 80 (Caddy),
+#      `bot` → container port 3001. Itu sebabnya pakai `expose`, bukan `ports`.
 #   3. Set env di dashboard Coolify:
 #        DATABASE_URL = mongodb+srv://... (wajib — dari DB cloud-mu)
 #        VITE_API_URL = https://<domain-api-bot> (wajib rebuild `web`)
@@ -53,14 +52,14 @@ services:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
     restart: unless-stopped
     expose:
-      - "4173"
+      - "80"
     # Lokal saja (Coolify: biarkan commented):
     # ports:
-    #   - "8080:4173"
+    #   - "8080:80"
     depends_on:
       - bot
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4173/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
       interval: 30s
       timeout: 5s
       start_period: 10s

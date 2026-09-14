@@ -20,20 +20,12 @@ ENV VITE_API_URL=${VITE_API_URL}
 RUN pnpm build-only
 
 
-# ===== RUNTIME (vite preview serve dist — tanpa nginx, Traefik yang proxy) =====
-FROM node:24-bookworm-slim AS runtime
+# ===== RUNTIME (Caddy static + SPA fallback) =====
+# CMD bawaan image sudah `caddy run --config /etc/caddy/Caddyfile
+# --adapter caddyfile`, jadi tidak perlu dideklarasikan ulang.
+FROM caddy:2-alpine AS runtime
 
-WORKDIR /app
+COPY Caddyfile /etc/caddy/Caddyfile
+COPY --from=builder /app/dist /srv
 
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/node_modules ./node_modules
-
-ENV NODE_ENV=production
-
-EXPOSE 4173
-
-# --host wajib (default localhost tidak reachable dari luar container).
-# Panggil biner vite langsung — `pnpm` di image slim hanya shim corepack
-# yang gagal resolve (Cannot find module '/app/pnpm').
-CMD ["./node_modules/.bin/vite", "preview", "--host", "0.0.0.0", "--port", "4173", "--strictPort"]
+EXPOSE 80
