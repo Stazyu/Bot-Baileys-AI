@@ -15,7 +15,7 @@ const pageTitle = computed(() => {
     'sessions': 'Sessions',
     'users': 'Users',
     'ai-logs': 'AI Chat Logs',
-    'command-logs': 'Command Logs',
+    'command-logs': 'Logs',
     'downloads': 'Media Downloads',
     'settings': 'Settings',
   }

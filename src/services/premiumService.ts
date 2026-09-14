@@ -23,6 +23,23 @@ const TIERS: Record<string, TierConfig> = {
   pro: { name: 'Pro', dailyAiChatLimit: Number.MAX_SAFE_INTEGER, dailyGroupAiLimit: Number.MAX_SAFE_INTEGER, dailyCommandLimit: Number.MAX_SAFE_INTEGER },
 };
 
+// Tier limit overrides from BotConfig — key → [tier, field]. Pro is always unlimited.
+const TIER_OVERRIDE_KEYS: Record<string, [tier: string, field: 'dailyAiChatLimit' | 'dailyGroupAiLimit' | 'dailyCommandLimit']> = {
+  'tier:free:ai': ['free', 'dailyAiChatLimit'],
+  'tier:free:group': ['free', 'dailyGroupAiLimit'],
+  'tier:free:command': ['free', 'dailyCommandLimit'],
+  'tier:premium:ai': ['premium', 'dailyAiChatLimit'],
+  'tier:premium:group': ['premium', 'dailyGroupAiLimit'],
+  'tier:premium:command': ['premium', 'dailyCommandLimit'],
+};
+
+/** Kunci tanggal harian (WIB) — sama dengan yang dipakai UsageLog. */
+export function todayKey(): string {
+  const now = new Date();
+  const jakarta = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+  return jakarta.toISOString().slice(0, 10);
+}
+
 type ToggleKey = 'privateAi' | 'groupAi' | 'command';
 const TOGGLE_CONFIG_KEYS: Record<ToggleKey, string> = {
   privateAi: 'premium:enforce_private_ai_limit',
@@ -37,6 +54,7 @@ class PremiumService {
   private enforceGroupAiLimit: boolean = true;
   private enforceCommandLimit: boolean = true;
   private initialized: boolean = false;
+  private tierOverrides: Record<string, Partial<TierConfig>> = {};
 
   constructor() {
     this.cache = new NodeCache({ stdTTL: this.USAGE_CACHE_TTL_SEC, checkperiod: 120 });
@@ -53,6 +71,7 @@ class PremiumService {
         if (cfg.key === TOGGLE_CONFIG_KEYS.groupAi) this.enforceGroupAiLimit = enabled;
         if (cfg.key === TOGGLE_CONFIG_KEYS.command) this.enforceCommandLimit = enabled;
       }
+      await this.reloadTiers();
       this.initialized = true;
       log.info(`🔒 [PremiumService] Init — PrivateAI: ${this.enforcePrivateAiLimit}, GroupAI: ${this.enforceGroupAiLimit}, Cmd: ${this.enforceCommandLimit}`);
     } catch (error) {
@@ -61,12 +80,37 @@ class PremiumService {
     }
   }
 
+  /** Baca ulang override tier dari BotConfig tanpa restart. */
+  async reloadTiers(): Promise<void> {
+    try {
+      const rows = await prisma.botConfig.findMany({ where: { key: { in: Object.keys(TIER_OVERRIDE_KEYS) } } });
+      const overrides: Record<string, Partial<TierConfig>> = {};
+      for (const row of rows) {
+        const mapping = TIER_OVERRIDE_KEYS[row.key];
+        if (!mapping) continue;
+        const value = Number(row.value);
+        if (!Number.isFinite(value) || value < 0) continue;
+        const [tier, field] = mapping;
+        overrides[tier] = { ...overrides[tier], [field]: value };
+      }
+      this.tierOverrides = overrides;
+    } catch (error) {
+      log.debug(`[PremiumService] Non-critical: tier reload failed: ${(error as Error).message}`);
+    }
+  }
+
   getTierConfig(tier: string): TierConfig {
-    return TIERS[tier] ?? TIERS.free;
+    const base = TIERS[tier] ?? TIERS.free;
+    const override = this.tierOverrides[tier];
+    return override ? { ...base, ...override } : base;
   }
 
   getAllTiers(): Record<string, TierConfig> {
-    return { ...TIERS };
+    const merged: Record<string, TierConfig> = {};
+    for (const [tier, base] of Object.entries(TIERS)) {
+      merged[tier] = this.tierOverrides[tier] ? { ...base, ...this.tierOverrides[tier] } : { ...base };
+    }
+    return merged;
   }
 
   async checkPrivateAiLimit(userId: string): Promise<LimitCheckResult> {
@@ -94,7 +138,7 @@ class PremiumService {
       if (limit === Number.MAX_SAFE_INTEGER) {
         return { allowed: true, remaining: Infinity, limit, tier };
       }
-      const today = this.getTodayKey();
+      const today = todayKey();
       const usage = await this.getTodayUsage(userId, today);
       const used = usage[countField] ?? 0;
       if (used >= limit) {
@@ -121,7 +165,7 @@ class PremiumService {
 
   private async incrementUsage(userId: string, field: 'aiChatCount' | 'groupAiCount' | 'commandCount'): Promise<void> {
     try {
-      const today = this.getTodayKey();
+      const today = todayKey();
       await prisma.usageLog.upsert({
         where: { userId_date: { userId, date: today } },
         create: { userId, date: today, [field]: 1 },
@@ -134,7 +178,7 @@ class PremiumService {
   }
 
   async getTodayUsage(userId: string, date?: string): Promise<{ aiChatCount: number; groupAiCount: number; commandCount: number }> {
-    const today = date ?? this.getTodayKey();
+    const today = date ?? todayKey();
     const cacheKey = this.usageCacheKey(userId, today);
     const cached = this.cache.get<{ aiChatCount: number; groupAiCount: number; commandCount: number }>(cacheKey);
     if (cached) return cached;
@@ -179,11 +223,6 @@ class PremiumService {
     }
   }
 
-  private getTodayKey(): string {
-    const now = new Date();
-    const jakarta = new Date(now.getTime() + 7 * 60 * 60 * 1000);
-    return jakarta.toISOString().slice(0, 10);
-  }
 
   private usageCacheKey(userId: string, date: string): string {
     return `usage:${userId}:${date}`;

@@ -106,6 +106,15 @@ export async function disconnectSession(sessionId: string): Promise<void> {
 }
 
 /**
+ * Hapus permanen: putus koneksi lalu buang semua baris DB sesi itu
+ *
+ * @param sessionId - Session identifier
+ */
+export async function deleteSession(sessionId: string): Promise<void> {
+  await sessionManager.deleteSession(sessionId);
+}
+
+/**
  * Disconnect all sessions
  */
 export async function disconnectAllSessions(): Promise<void> {

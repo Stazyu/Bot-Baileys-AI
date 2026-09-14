@@ -129,9 +129,9 @@ const telegramStickerPackCommand: CommandModule = {
         accessibilityLabel: `Telegram Sticker ${i + 1}`,
       }));
 
-      // Publisher fallback ke nama pack asli bila user tidak menspesifikasi,
-      // supaya info pack tetap bermakna (nama pack dikirim untuk seluruh pack,
-      // termasuk sticker animasi — level pack, bukan per-sticker).
+      // Publisher falls back to the original pack name when the user doesn't specify one,
+      // so pack info stays meaningful (the pack name is sent for the whole pack,
+      // including animated stickers — pack-level, not per-sticker).
       const publisher =
         parsed.authorName === 'Bot-Baileys-AI' ? result.packName : parsed.authorName;
 

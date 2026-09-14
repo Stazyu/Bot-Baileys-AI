@@ -10,6 +10,7 @@ import {
 } from "ai";
 import toolRegistry from "../tools/toolRegistry.js";
 import type { ToolContext, ToolExecuteResult } from "../types/tools.js";
+import { persistToolCall } from "./toolLogService.js";
 import {
   containsToolCallArtifact,
   stripToolCallArtifacts,
@@ -171,30 +172,44 @@ export class AIService {
     for (const [name, entry] of toolRegistry.entries()) {
       const toolDef = {
         description: entry.definition.function.description,
-        parameters: entry.definition.function.parameters,
         execute: async (args: unknown) => {
           const key = `${name}:${normalizeArgs(args)}`;
+          const startedAt = Date.now();
           const previous = executedCalls.get(key);
+          let result: ToolExecuteResult;
+          let cached = false;
           if (previous) {
             console.warn(`[AIService] ⛔ Duplicate tool call skipped: ${key}`);
-            return {
+            cached = true;
+            result = {
               success: true,
               message:
                 "Permintaan ini sudah diproses sebelumnya dengan hasil yang sama. Jangan memanggil tool yang sama berulang kali — langsung berikan jawaban final.",
               data: previous.data,
             };
+          } else {
+            result = await entry.execute(
+              args as Record<string, unknown>,
+              toolContext || {},
+            );
+            // Only remember SUCCESSFUL executions. A failed tool call must be
+            // allowed to run again — the model often re-calls it with corrected
+            // arguments (e.g. after it omitted `query`). Remembering failures
+            // would wrongly block the retry as a "duplicate".
+            if (result && result.success === true) {
+              executedCalls.set(key, result);
+            }
           }
-          const result = await entry.execute(
-            args as Record<string, unknown>,
-            toolContext || {},
-          );
-          // Only remember SUCCESSFUL executions. A failed tool call must be
-          // allowed to run again — the model often re-calls it with corrected
-          // arguments (e.g. after it omitted `query`). Remembering failures
-          // would wrongly block the retry as a "duplicate".
-          if (result && result.success === true) {
-            executedCalls.set(key, result);
-          }
+          // Dashboard: tool call log (persist fire-and-forget, termasuk cached).
+          void persistToolCall({
+            sessionId: toolContext?.waSessionId,
+            userId: toolContext?.userId,
+            tool: name,
+            args: normalizeArgs(args),
+            success: result?.success === true,
+            latencyMs: Date.now() - startedAt,
+            cached,
+          });
           return result;
         },
       } as Record<string, unknown>;

@@ -1,263 +1,134 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { Search, Users, UserCheck, Crown, Bot, Brain, type LucideIcon } from '@lucide/vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { Ban, Bot, Brain, Crown, Search, UserCheck, Users, type LucideIcon } from '@lucide/vue'
 import { cn } from '@/lib/utils'
+import { ApiError, api } from '@/lib/api'
+import type { UserItem, UsersPage, UsersSummary } from '@/lib/api-types'
+import { initials, shortJid, timeAgo } from '@/lib/format'
+import Skeleton from '@/components/ui/skeleton/Skeleton.vue'
 
-// ── Types ──────────────────────────────────────────────────────────
-interface BotUser {
-  id: string
-  pushName: string
-  jid: string
-  session: string
-  messagesIn: number
-  messagesOut: number
-  aiMode: boolean
-  premiumTier: 'free' | 'premium' | 'pro'
-  lastActive: Date
-  registeredAt: Date
-  status: 'active' | 'inactive'
-  groups: number
+type Tier = 'free' | 'premium' | 'pro'
+
+function asTier(tier: string): Tier {
+  return tier === 'premium' || tier === 'pro' ? tier : 'free'
 }
 
-// ── Mock Data ──────────────────────────────────────────────────────
-const users = ref<BotUser[]>([
-  {
-    id: 'u-01',
-    pushName: 'Budi Santoso',
-    jid: '6281234567890@s.whatsapp.net',
-    session: 'Wahyu',
-    messagesIn: 87,
-    messagesOut: 34,
-    aiMode: true,
-    premiumTier: 'free',
-    lastActive: new Date(Date.now() - 2 * 60 * 1000),
-    registeredAt: new Date('2025-12-01'),
-    status: 'active',
-    groups: 3,
-  },
-  {
-    id: 'u-02',
-    pushName: 'Siti Rahayu',
-    jid: '6289876543210@s.whatsapp.net',
-    session: 'Wahyu',
-    messagesIn: 142,
-    messagesOut: 51,
-    aiMode: true,
-    premiumTier: 'premium',
-    lastActive: new Date(Date.now() - 15 * 60 * 1000),
-    registeredAt: new Date('2025-11-15'),
-    status: 'active',
-    groups: 5,
-  },
-  {
-    id: 'u-03',
-    pushName: 'Andi Pratama',
-    jid: '6283334445556@s.whatsapp.net',
-    session: 'Bot Support',
-    messagesIn: 205,
-    messagesOut: 78,
-    aiMode: false,
-    premiumTier: 'free',
-    lastActive: new Date(Date.now() - 45 * 60 * 1000),
-    registeredAt: new Date('2026-01-10'),
-    status: 'active',
-    groups: 2,
-  },
-  {
-    id: 'u-04',
-    pushName: 'Dewi Lestari',
-    jid: '6285556667778@s.whatsapp.net',
-    session: 'Bot Support',
-    messagesIn: 64,
-    messagesOut: 22,
-    aiMode: true,
-    premiumTier: 'pro',
-    lastActive: new Date(Date.now() - 3 * 60 * 60 * 1000),
-    registeredAt: new Date('2025-10-05'),
-    status: 'active',
-    groups: 1,
-  },
-  {
-    id: 'u-05',
-    pushName: 'Rizky Fauzan',
-    jid: '6284443332221@s.whatsapp.net',
-    session: 'Wahyu',
-    messagesIn: 312,
-    messagesOut: 98,
-    aiMode: true,
-    premiumTier: 'premium',
-    lastActive: new Date(Date.now() - 5 * 60 * 60 * 1000),
-    registeredAt: new Date('2025-09-20'),
-    status: 'active',
-    groups: 7,
-  },
-  {
-    id: 'u-06',
-    pushName: 'Maya Indah',
-    jid: '6281112223334@s.whatsapp.net',
-    session: 'Premium Bot',
-    messagesIn: 28,
-    messagesOut: 9,
-    aiMode: false,
-    premiumTier: 'free',
-    lastActive: new Date(Date.now() - 12 * 60 * 60 * 1000),
-    registeredAt: new Date('2026-03-01'),
-    status: 'inactive',
-    groups: 0,
-  },
-  {
-    id: 'u-07',
-    pushName: 'Hendra Gunawan',
-    jid: '6287778889990@s.whatsapp.net',
-    session: 'Premium Bot',
-    messagesIn: 189,
-    messagesOut: 65,
-    aiMode: true,
-    premiumTier: 'pro',
-    lastActive: new Date(Date.now() - 30 * 60 * 1000),
-    registeredAt: new Date('2025-08-12'),
-    status: 'active',
-    groups: 4,
-  },
-  {
-    id: 'u-08',
-    pushName: 'Ratna Sari',
-    jid: '6289990001112@s.whatsapp.net',
-    session: 'Wahyu',
-    messagesIn: 56,
-    messagesOut: 18,
-    aiMode: true,
-    premiumTier: 'free',
-    lastActive: new Date(Date.now() - 2 * 60 * 60 * 1000),
-    registeredAt: new Date('2026-02-14'),
-    status: 'active',
-    groups: 1,
-  },
-  {
-    id: 'u-09',
-    pushName: 'Dimas Ardiansyah',
-    jid: '6286665554443@s.whatsapp.net',
-    session: 'Bot Support',
-    messagesIn: 431,
-    messagesOut: 156,
-    aiMode: false,
-    premiumTier: 'premium',
-    lastActive: new Date(Date.now() - 20 * 60 * 1000),
-    registeredAt: new Date('2025-07-25'),
-    status: 'active',
-    groups: 6,
-  },
-  {
-    id: 'u-10',
-    pushName: 'Fitri Handayani',
-    jid: '6283337778889@s.whatsapp.net',
-    session: 'Premium Bot',
-    messagesIn: 94,
-    messagesOut: 37,
-    aiMode: true,
-    premiumTier: 'free',
-    lastActive: new Date(Date.now() - 8 * 60 * 60 * 1000),
-    registeredAt: new Date('2026-01-28'),
-    status: 'active',
-    groups: 2,
-  },
-  {
-    id: 'u-11',
-    pushName: 'Agus Wijaya',
-    jid: '6282225556667@s.whatsapp.net',
-    session: 'Wahyu',
-    messagesIn: 17,
-    messagesOut: 5,
-    aiMode: false,
-    premiumTier: 'free',
-    lastActive: new Date(Date.now() - 48 * 60 * 60 * 1000),
-    registeredAt: new Date('2026-04-05'),
-    status: 'inactive',
-    groups: 0,
-  },
-  {
-    id: 'u-12',
-    pushName: 'Putri Ayuningtyas',
-    jid: '6288881112223@s.whatsapp.net',
-    session: 'Bot Support',
-    messagesIn: 267,
-    messagesOut: 89,
-    aiMode: true,
-    premiumTier: 'premium',
-    lastActive: new Date(Date.now() - 10 * 60 * 1000),
-    registeredAt: new Date('2025-11-30'),
-    status: 'active',
-    groups: 4,
-  },
-])
+const items = ref<UserItem[]>([])
+const summary = ref<UsersSummary | null>(null)
+const total = ref(0)
+const page = ref(1)
+const pageSize = 20
+const loading = ref(true)
+const error = ref('')
+const actionBusy = ref('')
 
-// ── Stats ──────────────────────────────────────────────────────────
-const totalUsers = computed(() => users.value.length)
-const activeUsers = computed(() => users.value.filter((u) => u.status === 'active').length)
-const premiumUsers = computed(() => users.value.filter((u) => u.premiumTier !== 'free').length)
-const aiModeUsers = computed(() => users.value.filter((u) => u.aiMode).length)
-
-const statCards = computed<{ label: string; value: number; icon: LucideIcon; change: string }[]>(() => [
-  { label: 'Total Users', value: totalUsers.value, icon: Users, change: `${activeUsers.value} active` },
-  { label: 'Active Rate', value: Math.round(activeUsers.value / totalUsers.value * 100), icon: UserCheck, change: `${activeUsers.value} of ${totalUsers.value}` },
-  { label: 'Premium', value: premiumUsers.value, icon: Crown, change: `${Math.round(premiumUsers.value / totalUsers.value * 100)}% of total` },
-  { label: 'AI Mode', value: aiModeUsers.value, icon: Bot, change: `${Math.round(aiModeUsers.value / totalUsers.value * 100)}% of total` },
-])
-
-// ── Search & Filter ────────────────────────────────────────────────
 const searchQuery = ref('')
-const tierFilter = ref<'all' | 'free' | 'premium' | 'pro'>('all')
+const tierFilter = ref<'all' | Tier>('all')
 const statusFilter = ref<'all' | 'active' | 'inactive'>('all')
 
-const tierOptions = computed(() => {
-  const count = (t: string): number => users.value.filter((u) => t === 'all' || u.premiumTier === t).length
+async function loadSummary(): Promise<void> {
+  try {
+    summary.value = await api<UsersSummary>('/api/users/summary')
+  } catch {
+    // Stat tetap tampil dari data halaman bila summary gagal.
+  }
+}
+
+async function loadPage(): Promise<void> {
+  loading.value = true
+  error.value = ''
+  try {
+    const res = await api<UsersPage>('/api/users', {
+      query: {
+        search: searchQuery.value.trim() || undefined,
+        tier: tierFilter.value === 'all' ? undefined : tierFilter.value,
+        status: statusFilter.value === 'all' ? undefined : statusFilter.value,
+        page: page.value,
+        pageSize,
+      },
+    })
+    items.value = res.items
+    total.value = res.total
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.message : 'Failed to load users'
+  } finally {
+    loading.value = false
+  }
+}
+
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+watch([searchQuery, tierFilter, statusFilter], () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    page.value = 1
+    void loadPage()
+  }, 350)
+})
+
+function nextPage(): void {
+  page.value += 1
+  void loadPage()
+}
+
+function prevPage(): void {
+  if (page.value > 1) {
+    page.value -= 1
+    void loadPage()
+  }
+}
+
+async function toggleBlock(user: UserItem): Promise<void> {
+  actionBusy.value = user.userId
+  try {
+    const updated = await api<UserItem>(`/api/users/${encodeURIComponent(user.userId)}`, {
+      method: 'PATCH',
+      body: { isBlocked: !user.isBlocked },
+    })
+    const idx = items.value.findIndex((u) => u.userId === user.userId)
+    if (idx >= 0) items.value[idx] = updated
+  } catch {
+    // Gagal — biarkan baris apa adanya; error global tidak perlu untuk aksi kecil.
+  } finally {
+    actionBusy.value = ''
+  }
+}
+
+onMounted(() => {
+  void loadSummary()
+  void loadPage()
+})
+
+// ── Stats ──────────────────────────────────────────────────────────
+const totalUsers = computed(() => summary.value?.total ?? total.value)
+const activeUsers = computed(() => summary.value?.active ?? 0)
+const premiumUsers = computed(() => (summary.value ? (summary.value.byTier.premium ?? 0) + (summary.value.byTier.pro ?? 0) : 0))
+const aiModeUsers = computed(() => summary.value?.aiMode ?? 0)
+
+const statCards = computed<{ label: string; value: number; icon: LucideIcon; change: string }[]>(() => {
+  const pct = (n: number): string => (totalUsers.value > 0 ? `${Math.round((n / totalUsers.value) * 100)}% of total` : '—')
   return [
-    { key: 'all', label: 'All tiers', count: count('all') },
-    { key: 'free', label: 'Free', count: count('free') },
-    { key: 'premium', label: 'Premium', count: count('premium') },
-    { key: 'pro', label: 'Pro', count: count('pro') },
+    { label: 'Total Users', value: totalUsers.value, icon: Users, change: `${activeUsers.value} active` },
+    { label: 'Active', value: activeUsers.value, icon: UserCheck, change: `${activeUsers.value} of ${totalUsers.value}` },
+    { label: 'Premium', value: premiumUsers.value, icon: Crown, change: pct(premiumUsers.value) },
+    { label: 'AI Mode', value: aiModeUsers.value, icon: Bot, change: pct(aiModeUsers.value) },
+  ]
+})
+
+// ── Filter pills ───────────────────────────────────────────────────
+const tierOptions = computed(() => {
+  const by = summary.value?.byTier
+  return [
+    { key: 'all', label: 'All tiers', count: summary.value?.total ?? total.value },
+    { key: 'free', label: 'Free', count: by?.free ?? 0 },
+    { key: 'premium', label: 'Premium', count: by?.premium ?? 0 },
+    { key: 'pro', label: 'Pro', count: by?.pro ?? 0 },
   ] as const
 })
 
-const filteredUsers = computed(() => {
-  const q = searchQuery.value.toLowerCase().trim()
-  return users.value.filter((u) => {
-    const matchQuery
-      = !q
-        || u.pushName.toLowerCase().includes(q)
-        || u.jid.toLowerCase().includes(q)
-        || u.session.toLowerCase().includes(q)
-    const matchTier = tierFilter.value === 'all' || u.premiumTier === tierFilter.value
-    const matchStatus = statusFilter.value === 'all' || u.status === statusFilter.value
-    return matchQuery && matchTier && matchStatus
-  })
-})
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 
-// ── Helpers ────────────────────────────────────────────────────────
-function initials(name: string): string {
-  return name
-    .split(' ')
-    .map((w) => w[0] ?? '')
-    .slice(0, 2)
-    .join('')
-    .toUpperCase()
-}
-
-function timeAgo(date: Date): string {
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffMin = Math.floor(diffMs / 60000)
-  if (diffMin < 1) return 'Just now'
-  if (diffMin < 60) return `${diffMin}m ago`
-  const diffHour = Math.floor(diffMin / 60)
-  if (diffHour < 24) return `${diffHour}h ago`
-  const diffDay = Math.floor(diffHour / 24)
-  if (diffDay < 7) return `${diffDay}d ago`
-  return date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })
-}
-
-const tierPill = (tier: BotUser['premiumTier']): string => {
-  const map: Record<BotUser['premiumTier'], string> = {
+const tierPill = (tier: Tier): string => {
+  const map: Record<Tier, string> = {
     free: 'bg-muted text-muted-foreground',
     premium: 'bg-amber-500/10 text-amber-600 dark:text-amber-300',
     pro: 'bg-violet-500/10 text-violet-600 dark:text-violet-300',
@@ -294,16 +165,14 @@ const clearFilters = (): void => {
         <div class="flex items-start justify-between gap-3">
           <div>
             <p class="text-eyebrow text-muted-foreground">{{ stat.label }}</p>
-            <p class="mt-1.5 text-[32px] leading-none font-bold tracking-tight text-foreground">
-              {{ stat.value }}<span v-if="stat.label === 'Active Rate'" class="text-lg text-muted-foreground">%</span>
-            </p>
+            <p class="mt-1.5 text-[32px] leading-none font-bold tracking-tight text-foreground">{{ stat.value }}</p>
           </div>
           <span class="flex size-11 items-center justify-center rounded-full bg-primary/[0.07] text-primary transition-design group-hover:scale-105">
             <component :is="stat.icon" class="size-5" />
           </span>
         </div>
         <div class="mt-3">
-          <span class="inline-flex items-center rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-600 dark:text-emerald-300">
+          <span class="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-xs font-semibold text-muted-foreground">
             {{ stat.change }}
           </span>
         </div>
@@ -317,7 +186,7 @@ const clearFilters = (): void => {
         <input
           v-model="searchQuery"
           type="search"
-          placeholder="Search name, number, session…"
+          placeholder="Search name or number…"
           class="w-full rounded-full bg-card py-2.5 pr-4 pl-11 text-sm shadow-soft outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-emerald-500/40"
         />
       </div>
@@ -359,47 +228,71 @@ const clearFilters = (): void => {
     <section class="rounded-[24px] bg-card px-3 py-6 shadow-soft sm:px-4">
       <header class="flex items-center justify-between px-3 pb-3 sm:px-4">
         <h3 class="text-xl font-bold tracking-tight">Bot Users</h3>
-        <span class="text-xs font-semibold text-muted-foreground">{{ filteredUsers.length }} users</span>
+        <span class="text-xs font-semibold text-muted-foreground">{{ total }} users</span>
       </header>
-      <ul v-if="filteredUsers.length" class="space-y-1">
+      <div v-if="loading && items.length === 0" class="space-y-2 px-3 sm:px-4">
+        <Skeleton v-for="i in 5" :key="i" class="h-[68px] w-full rounded-2xl" />
+      </div>
+      <div v-else-if="error && items.length === 0" class="flex flex-col items-center px-6 py-14 text-center">
+        <p class="mt-4 text-base font-bold">Couldn't load users</p>
+        <p class="mt-1 max-w-xs text-sm text-muted-foreground">{{ error }}</p>
+        <button @click="loadPage()" class="mt-5 rounded-full bg-muted px-5 py-2 text-xs font-semibold transition-design hover:text-foreground">
+          Retry
+        </button>
+      </div>
+      <ul v-else-if="items.length" class="space-y-1">
         <li
-          v-for="user in filteredUsers"
-          :key="user.id"
+          v-for="user in items"
+          :key="user.userId"
           class="flex items-center gap-4 rounded-2xl px-3 py-3.5 sm:px-4"
+          :class="user.isBlocked && 'opacity-60'"
         >
           <span class="relative flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/[0.07] text-[13px] font-bold text-primary">
-            {{ initials(user.pushName) }}
+            {{ initials(user.pushName ?? shortJid(user.userId)) }}
             <span
               class="absolute -right-0.5 -bottom-0.5 size-3 rounded-full border-2 border-card"
-              :class="user.status === 'active' ? 'bg-emerald-500' : 'bg-muted-foreground/50'"
+              :class="user.status === 'active' && !user.isBlocked ? 'bg-emerald-500' : 'bg-muted-foreground/50'"
             />
           </span>
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <p class="truncate text-sm font-semibold">{{ user.pushName }}</p>
-              <span :class="cn('rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize', tierPill(user.premiumTier))">
-                {{ user.premiumTier }}
+              <p class="truncate text-sm font-semibold">{{ user.pushName ?? shortJid(user.userId) }}</p>
+              <span :class="cn('rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize', tierPill(asTier(user.tier)))">
+                {{ asTier(user.tier) }}
               </span>
-              <span v-if="user.aiMode" class="inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-2 py-0.5 text-[11px] font-semibold text-violet-600 dark:text-violet-300">
+              <span v-if="user.aiModeEnabled" class="inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-2 py-0.5 text-[11px] font-semibold text-violet-600 dark:text-violet-300">
                 <Brain class="size-3" />
                 AI
               </span>
+              <span v-if="user.isBlocked" class="rounded-full bg-rose-500/10 px-2 py-0.5 text-[11px] font-semibold text-rose-600 dark:text-rose-300">
+                Blocked
+              </span>
             </div>
             <p class="mt-1 truncate text-xs text-muted-foreground">
-              <span class="font-mono">{{ user.jid.split('@')[0] }}</span>
+              <span class="font-mono">{{ shortJid(user.userId) }}</span>
               <span aria-hidden="true"> · </span>
-              <span>{{ user.session }}</span>
+              <span>{{ user.sessionId ?? '—' }}</span>
               <span aria-hidden="true"> · </span>
-              <span>{{ user.groups }} groups</span>
+              <span>{{ user.messageCount }} msgs</span>
             </p>
           </div>
-          <div class="hidden shrink-0 text-right sm:block">
-            <p class="text-sm font-bold tabular-nums">{{ (user.messagesIn + user.messagesOut).toLocaleString() }}</p>
-            <p class="text-[11px] tabular-nums text-muted-foreground">↓{{ user.messagesIn }} ↑{{ user.messagesOut }}</p>
-          </div>
           <span class="hidden w-20 shrink-0 text-right text-[11px] text-muted-foreground md:block">
-            {{ timeAgo(user.lastActive) }}
+            {{ timeAgo(user.lastSeen) }}
           </span>
+          <button
+            @click="toggleBlock(user)"
+            :disabled="actionBusy === user.userId"
+            :title="user.isBlocked ? 'Unblock user' : 'Block user'"
+            :aria-label="user.isBlocked ? `Unblock ${shortJid(user.userId)}` : `Block ${shortJid(user.userId)}`"
+            :class="cn(
+              'flex size-9 shrink-0 items-center justify-center rounded-full transition-design disabled:opacity-50',
+              user.isBlocked
+                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
+                : 'bg-muted text-muted-foreground hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-300',
+            )"
+          >
+            <Ban class="size-4" />
+          </button>
         </li>
       </ul>
       <div v-else class="flex flex-col items-center px-6 py-14 text-center">
@@ -410,6 +303,23 @@ const clearFilters = (): void => {
         <p class="mt-1 max-w-xs text-sm text-muted-foreground">Try a different search term or filter.</p>
         <button @click="clearFilters" class="mt-5 rounded-full bg-muted px-5 py-2 text-xs font-semibold transition-design hover:text-foreground">
           Clear filters
+        </button>
+      </div>
+      <div v-if="totalPages > 1" class="flex items-center justify-center gap-3 px-4 pt-4">
+        <button
+          @click="prevPage"
+          :disabled="page <= 1"
+          class="rounded-full bg-muted px-5 py-2 text-xs font-semibold transition-design hover:text-foreground disabled:opacity-40"
+        >
+          Prev
+        </button>
+        <span class="text-xs font-semibold text-muted-foreground tabular-nums">Page {{ page }} of {{ totalPages }}</span>
+        <button
+          @click="nextPage"
+          :disabled="page >= totalPages"
+          class="rounded-full bg-muted px-5 py-2 text-xs font-semibold transition-design hover:text-foreground disabled:opacity-40"
+        >
+          Next
         </button>
       </div>
     </section>

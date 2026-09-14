@@ -3,6 +3,8 @@ import { createSession, loadActiveSessions, disconnectAllSessions, getAllSession
 import prisma from './database/prisma.js';
 import { registerAllTools } from './tools/index.js';
 import { premiumService } from './services/premiumService.js';
+import { startServer, stopServer } from './server/index.js';
+import type { FastifyInstance } from 'fastify';
 
 // Set console encoding to UTF-8 for emoji support on Windows
 if (process.platform === 'win32') {
@@ -56,6 +58,14 @@ async function main() {
     }
   }
 
+  // Dashboard API — same process as the bot (Baileys socket is not serializable).
+  let server: FastifyInstance | null = null;
+  try {
+    server = await startServer();
+  } catch (error) {
+    console.error('⚠️ Dashboard API gagal start (bot tetap jalan):', error);
+  }
+
   console.log('✅ Bot is running!');
   console.log('💡 Use --session=<session-id> [--force-clear] to create/replace a session');
   console.log('💡 Use --only with --session=<id> to run only that session');
@@ -66,6 +76,11 @@ async function main() {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`\n🛑 Received ${signal} — shutting down bot...`);
+    try {
+      if (server) await stopServer(server);
+    } catch (error) {
+      console.error('❌ Error stopping API server during shutdown:', error);
+    }
     try {
       await disconnectAllSessions();
     } catch (error) {

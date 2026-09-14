@@ -14,6 +14,8 @@ import { rateLimiter } from '../utils/rateLimiter.js';
 import { log } from '../utils/logger.js';
 import { userService } from '../services/userService.js';
 import { premiumService } from '../services/premiumService.js';
+import { bus } from '../server/events.js';
+import { persistInboundMessage, persistOutboundMessage } from '../services/messageService.js';
 
 moment.locale('jv');
 
@@ -42,6 +44,7 @@ export class BotHandler {
   private sessionId: string;
   private pluginManager: PluginManager;
   private groupCache: NodeCache;
+  private inboundAt = 0;
 
   constructor(socket: WASocket, sessionId: string) {
     log.info(`🤖 [BotHandler] Creating handler for session: ${sessionId}`);
@@ -417,11 +420,27 @@ export class BotHandler {
       }
 
       this.printLog(simplified);
+      this.inboundAt = Date.now();
+      bus.emitActivity({
+        type: 'message',
+        sessionId: this.sessionId,
+        session: typeof simplified.pushName === 'string' ? simplified.pushName : undefined,
+        detail: simplified.isGroup ? 'Incoming group message' : 'Incoming private message',
+      });
+      // Dashboard: persist for Messages Today / Traffic / Chat Logs (fire-and-forget).
+      void persistInboundMessage({
+        sessionId: this.sessionId,
+        key: message.key,
+        message: message.message,
+        messageTimestamp: simplified.messageTimeStamp,
+        pushName: typeof simplified.pushName === 'string' ? simplified.pushName : undefined,
+      });
 
       // ── Step 4: Process the message ──────────────────────────────────────
       await this.processMessage(message, simplified);
     } catch (error) {
       log.error(`[${this.sessionId}] ❌ Error handling message:`, error as object);
+      bus.emitActivity({ type: 'error', sessionId: this.sessionId, detail: `Message handling failed: ${(error as Error).message.slice(0, 120)}` });
 
       // ── Recovery: Notify user if possible ────────────────────────────────
       try {
@@ -610,6 +629,7 @@ export class BotHandler {
           if (socialLink) {
             log.info(`[${this.sessionId}] 🔗 Social media link detected: ${socialLink.platform} - ${socialLink.url}`);
             await downloadFromSocialMedia(socialLink, this.socket, from);
+            bus.emitActivity({ type: 'download', sessionId: this.sessionId, detail: `${socialLink.platform} media saved` });
             return;
           }
         } catch (error) {
@@ -694,12 +714,23 @@ export class BotHandler {
         };
 
         try {
+          const cmdStart = Date.now();
           const executed = await this.pluginManager.executeCommand(command, context, args);
 
           // Increment premium usage counter (fire-and-forget)
           if (executed && cmdConfig?.limitEnabled === true) {
             premiumService.incrementCommandUsage(effectiveUserId).catch(() => {});
           }
+
+          // Dashboard: command log + activity (persist fire-and-forget di bus)
+          void bus.emitCommand({
+            sessionId: this.sessionId,
+            userId: effectiveUserId,
+            command,
+            args: Array.isArray(args) ? args.join(' ') : String(args ?? ''),
+            success: executed,
+            latencyMs: Date.now() - cmdStart,
+          });
 
           if (!executed) {
             await this.socket.sendMessage(from, {
@@ -719,6 +750,7 @@ export class BotHandler {
       }
     } catch (error) {
       log.error(`[${this.sessionId}] ❌ Fatal error in processMessage:`, error as object);
+      bus.emitActivity({ type: 'error', sessionId: this.sessionId, detail: `Fatal message error: ${(error as Error).message.slice(0, 120)}` });
 
       // Last-resort recovery: notify user
       try {
@@ -756,6 +788,8 @@ export class BotHandler {
         socket: this.socket,
         fromJid: to,
         sessionId: userId,
+        waSessionId: this.sessionId,
+        userId,
         pushName,
         userMessage: message,
       };
@@ -816,6 +850,9 @@ export class BotHandler {
       await this.socket.sendMessage(to, {
         text: safeResponse,
       }, { quoted: quotedMessageObj });
+      bus.emitActivity({ type: 'ai', sessionId: this.sessionId, detail: 'AI replied in group' });
+      this.trackReply();
+      void persistOutboundMessage({ sessionId: this.sessionId, to, content: { text: safeResponse } });
     } catch (error: any) {
       const errorMessage = error?.message?.toLowerCase() || '';
       let userFriendlyMessage: string;
@@ -863,6 +900,8 @@ export class BotHandler {
         socket: this.socket,
         fromJid: to,
         sessionId: userId,
+        waSessionId: this.sessionId,
+        userId,
         pushName: simplified.pushName ?? undefined,
         userMessage: message,
       };
@@ -915,6 +954,9 @@ export class BotHandler {
       await this.socket.sendMessage(to, {
         text: safeResponse,
       }, { quoted: quotedMessageObj });
+      bus.emitActivity({ type: 'ai', sessionId: this.sessionId, detail: 'AI replied to private chat' });
+      this.trackReply();
+      void persistOutboundMessage({ sessionId: this.sessionId, to, content: { text: safeResponse } });
     } catch (error: any) {
       const errorMessage = error?.message?.toLowerCase() || '';
       let userFriendlyMessage: string;
@@ -942,6 +984,11 @@ export class BotHandler {
     }
   }
 
+  /** Record inbound-to-reply latency for the dashboard p50. */
+  private trackReply(): void {
+    if (this.inboundAt > 0) bus.recordReplyLatency(Date.now() - this.inboundAt);
+  }
+
   async sendMessage(jid: string, content: any): Promise<void> {
     try {
       // Validate JID before sending
@@ -951,6 +998,8 @@ export class BotHandler {
         return;
       }
       await this.socket.sendMessage(jid, content);
+      this.trackReply();
+      void persistOutboundMessage({ sessionId: this.sessionId, to: jid, content });
     } catch (error: any) {
       const errorMsg = error?.message?.toLowerCase() || '';
       if (errorMsg.includes('rate-overlimit') || errorMsg.includes('429')) {

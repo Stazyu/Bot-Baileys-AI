@@ -18,13 +18,17 @@ import {
   Wrench,
 } from '@lucide/vue'
 import { onClickOutside, useColorMode } from '@vueuse/core'
-import { computed, ref, useTemplateRef } from 'vue'
+import { computed, onMounted, ref, useTemplateRef } from 'vue'
+import { RouterLink } from 'vue-router'
 import SettingsNav from '@/components/settings/SettingsNav.vue'
 import SettingRow from '@/components/settings/SettingRow.vue'
 import SettingSection from '@/components/settings/SettingSection.vue'
 import SettingSwitch from '@/components/settings/SettingSwitch.vue'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+import { ApiError, api } from '@/lib/api'
+import type { DashboardStats, SettingsData, SettingsPatchResult } from '@/lib/api-types'
+import { useSessionsStore } from '@/stores/sessions'
 
 interface SettingsSection {
   id: string
@@ -44,38 +48,37 @@ const sections: SettingsSection[] = [
 ]
 
 const activeSection = ref<string>('profile')
+const sessionsStore = useSessionsStore()
+
+// ── Remote state ────────────────────────────────────────────────
+const loading = ref(true)
+const loadError = ref('')
+const saving = ref(false)
+const saveNote = ref('')
+const stats = ref<{ activeSessions: number; registeredUsers: number } | null>(null)
 
 // ── Profile ─────────────────────────────────────────────────────
 const profile = ref({
-  botName: 'Bot-Baileys-AI',
-  ownerJid: '6281578794887@s.whatsapp.net',
-  ownerNumber: '+62 815-7879-4887',
-  version: '2.0.0',
-  registeredAt: '2026-05-01',
-  lastConnected: '25/7/2026, 19.51.07',
+  botName: '',
+  ownerJid: '',
+  ownerNumber: '',
+  version: '',
 })
 
 // ── Prefixes ────────────────────────────────────────────────────
-const prefixes = ref<string>('!, ., #, /')
+const prefixes = ref<string>('')
 const commandCooldown = ref<number>(2)
 
 // ── AI Behavior ─────────────────────────────────────────────────
 const ai = ref({
   provider: 'openrouter',
-  model: 'anthropic/claude-3.5-sonnet',
+  model: '',
   systemPromptName: 'default',
   maxToolRounds: 4,
   streamResponses: true,
   groupAutoReply: true,
   groupMentionOnly: true,
-  toolsEnabled: {
-    webSearch: true,
-    webFetch: true,
-    downloadSocial: true,
-    downloadYoutube: true,
-    pinterestSearch: true,
-    pinterestSticker: true,
-  },
+  toolsEnabled: {} as Record<string, boolean>,
 })
 
 const toolLabels: Record<string, string> = {
@@ -99,17 +102,23 @@ const toolDescriptions: Record<string, string> = {
 // ── Tiers ───────────────────────────────────────────────────────
 const tiers = ref({
   freeAiChats: 20,
-  freeCommandUses: 30,
+  freeGroupAi: 50,
+  freeCommandUses: 20,
   premiumAiChats: 200,
-  premiumCommandUses: 500,
-  proAiChats: 1000,
-  proCommandUses: 5000,
+  premiumGroupAi: 500,
+  premiumCommandUses: 200,
+})
+
+const limitToggles = ref({
+  privateAi: true,
+  groupAi: true,
+  command: true,
 })
 
 // ── Maintenance ─────────────────────────────────────────────────
 const maintenance = ref({
   enabled: false,
-  message: '🔧 Bot sedang dalam maintenance. Silakan coba lagi nanti.',
+  message: '',
   bypassOwners: true,
 })
 
@@ -123,6 +132,7 @@ const isDark = computed({
 })
 
 // ── Security ────────────────────────────────────────────────────
+const PIN_KEY = 'dashboard.pin'
 const security = ref({
   dashboardPin: '',
   blockUnknownJid: false,
@@ -130,16 +140,142 @@ const security = ref({
   rateLimitPerMinute: 30,
 })
 
+function readPin(): string {
+  try {
+    return localStorage.getItem(PIN_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+// ── Load / save ─────────────────────────────────────────────────
+async function load(): Promise<void> {
+  loading.value = true
+  loadError.value = ''
+  saveNote.value = ''
+  try {
+    const [s, st] = await Promise.all([
+      api<SettingsData>('/api/settings'),
+      api<DashboardStats>('/api/dashboard/stats').catch(() => null),
+    ])
+    profile.value = {
+      botName: s.profile.botName,
+      ownerJid: s.profile.ownerNumbers[0] ?? '',
+      ownerNumber: (s.profile.ownerNumbers[0] ?? '').split('@')[0] ?? '',
+      version: s.profile.version,
+    }
+    prefixes.value = s.prefixes.list.join(', ')
+    commandCooldown.value = s.prefixes.commandCooldownSec
+    ai.value = {
+      provider: s.ai.provider,
+      model: s.ai.model,
+      systemPromptName: s.ai.systemPromptName,
+      maxToolRounds: s.ai.maxToolRounds,
+      streamResponses: s.ai.streamResponses,
+      groupAutoReply: s.ai.groupAutoReply,
+      groupMentionOnly: s.ai.groupMentionOnly,
+      toolsEnabled: { ...s.ai.toolsEnabled },
+    }
+    for (const key of Object.keys(toolLabels)) {
+      if (!(key in ai.value.toolsEnabled)) ai.value.toolsEnabled[key] = true
+    }
+    tiers.value = {
+      freeAiChats: s.tiers.free.ai,
+      freeGroupAi: s.tiers.free.group,
+      freeCommandUses: s.tiers.free.command,
+      premiumAiChats: s.tiers.premium.ai,
+      premiumGroupAi: s.tiers.premium.group,
+      premiumCommandUses: s.tiers.premium.command,
+    }
+    limitToggles.value = {
+      privateAi: s.tiers.enforcePrivateAi,
+      groupAi: s.tiers.enforceGroupAi,
+      command: s.tiers.enforceCommand,
+    }
+    maintenance.value = {
+      enabled: s.maintenance.enabled,
+      message: s.maintenance.message,
+      bypassOwners: maintenance.value.bypassOwners,
+    }
+    security.value = {
+      dashboardPin: readPin(),
+      blockUnknownJid: s.security.blockUnknownJid,
+      logAllMessages: s.security.logAllMessages,
+      rateLimitPerMinute: s.security.rateLimitPerMinute,
+    }
+    if (st) stats.value = { activeSessions: st.activeSessions, registeredUsers: st.registeredUsers }
+    unsaved.value = false
+  } catch (e) {
+    loadError.value = e instanceof ApiError ? e.message : 'Failed to load settings'
+  } finally {
+    loading.value = false
+  }
+  if (sessionsStore.items.length === 0) void sessionsStore.fetchAll()
+}
+
 // ── Unsaved-changes indicator ──────────────────────────────────
 const unsaved = ref<boolean>(false)
 function markDirty(): void {
   unsaved.value = true
+  saveNote.value = ''
 }
 function resetAll(): void {
-  unsaved.value = false
+  void load()
 }
-function saveAll(): void {
-  unsaved.value = false
+async function saveAll(): Promise<void> {
+  if (saving.value) return
+  saving.value = true
+  saveNote.value = ''
+  try {
+    try {
+      localStorage.setItem(PIN_KEY, security.value.dashboardPin)
+    } catch {
+      // PIN browser-lokal opsional — abaikan bila storage diblokir.
+    }
+    const ownerJid = profile.value.ownerJid.trim() || `${profile.value.ownerNumber.trim()}@s.whatsapp.net`
+    const res = await api<SettingsPatchResult>('/api/settings', {
+      method: 'PATCH',
+      body: {
+        profile: { botName: profile.value.botName.trim(), ownerNumbers: [ownerJid] },
+        prefixes: {
+          list: prefixes.value.split(',').map((p) => p.trim()).filter((p) => p.length > 0),
+          commandCooldownSec: commandCooldown.value,
+        },
+        ai: {
+          provider: ai.value.provider,
+          model: ai.value.model,
+          systemPromptName: ai.value.systemPromptName,
+          maxToolRounds: ai.value.maxToolRounds,
+          streamResponses: ai.value.streamResponses,
+          groupAutoReply: ai.value.groupAutoReply,
+          groupMentionOnly: ai.value.groupMentionOnly,
+          toolsEnabled: ai.value.toolsEnabled,
+        },
+        tiers: {
+          free: { ai: tiers.value.freeAiChats, group: tiers.value.freeGroupAi, command: tiers.value.freeCommandUses },
+          premium: { ai: tiers.value.premiumAiChats, group: tiers.value.premiumGroupAi, command: tiers.value.premiumCommandUses },
+          enforcePrivateAi: limitToggles.value.privateAi,
+          enforceGroupAi: limitToggles.value.groupAi,
+          enforceCommand: limitToggles.value.command,
+        },
+        maintenance: { enabled: maintenance.value.enabled, message: maintenance.value.message },
+        security: {
+          blockUnknownJid: security.value.blockUnknownJid,
+          logAllMessages: security.value.logAllMessages,
+          rateLimitPerMinute: security.value.rateLimitPerMinute,
+        },
+      },
+    })
+    unsaved.value = false
+    const applied = Object.keys(res.applied).length
+    saveNote.value = res.requiresRestart.includes('ai')
+      ? `Tersimpan — ${applied} diterapkan live. Perubahan AI butuh restart bot.`
+      : `Tersimpan — ${applied} diterapkan live.`
+  } catch (e) {
+    saveNote.value = `Gagal menyimpan: ${e instanceof ApiError ? e.message : 'network error'}`
+  } finally {
+    saving.value = false
+  }
 }
 
 const inputSoft = 'rounded-2xl border-transparent bg-muted/50 focus-visible:ring-emerald-500/40'
@@ -160,6 +296,8 @@ function selectProvider(value: string): void {
   providerOpen.value = false
   markDirty()
 }
+
+onMounted(() => void load())
 </script>
 
 <template>
@@ -241,12 +379,12 @@ function selectProvider(value: string): void {
 
             <div class="grid gap-3 sm:grid-cols-2">
               <div class="rounded-2xl bg-muted/50 p-4">
-                <p class="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">Terakhir Terhubung</p>
-                <p class="mt-1 text-sm font-bold">{{ profile.lastConnected }}</p>
+                <p class="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">Sesi Terhubung</p>
+                <p class="mt-1 text-sm font-bold">{{ stats ? `${stats.activeSessions} sesi` : '—' }}</p>
               </div>
               <div class="rounded-2xl bg-muted/50 p-4">
-                <p class="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">Tanggal Registrasi</p>
-                <p class="mt-1 text-sm font-bold">{{ profile.registeredAt }}</p>
+                <p class="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">Pengguna Terdaftar</p>
+                <p class="mt-1 text-sm font-bold">{{ stats ? stats.registeredUsers : '—' }}</p>
               </div>
             </div>
           </div>
@@ -295,26 +433,41 @@ function selectProvider(value: string): void {
             </div>
           </div>
           <div class="mt-6 space-y-3">
-            <div class="flex items-center justify-between rounded-2xl bg-muted/50 p-4">
-              <div class="flex items-center gap-3">
-                <span class="flex size-10 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-300">
+            <div
+              v-for="s in sessionsStore.items.slice(0, 4)"
+              :key="s.id"
+              class="flex items-center justify-between rounded-2xl bg-muted/50 p-4"
+            >
+              <div class="flex min-w-0 items-center gap-3">
+                <span class="flex size-10 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-300">
                   <Phone class="size-4" />
                 </span>
-                <div>
-                  <p class="text-sm font-bold">main</p>
-                  <p class="font-mono text-xs text-muted-foreground">+62 815-7879-4887</p>
+                <div class="min-w-0">
+                  <p class="truncate font-mono text-sm font-bold">{{ s.phoneNumber ?? s.id }}</p>
+                  <p class="truncate font-mono text-xs text-muted-foreground">{{ s.id }}</p>
                 </div>
               </div>
-              <span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-300">
+              <span
+                class="inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold"
+                :class="s.status === 'connected'
+                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
+                  : s.status === 'pairing'
+                    ? 'bg-sky-500/10 text-sky-600 dark:text-sky-300'
+                    : 'bg-muted text-muted-foreground'"
+              >
                 <span class="relative flex size-2">
-                  <span class="absolute inline-flex size-full animate-ping rounded-full bg-emerald-500 opacity-60" />
-                  <span class="relative inline-flex size-2 rounded-full bg-emerald-500" />
+                  <span v-if="s.status === 'connected'" class="absolute inline-flex size-full animate-ping rounded-full bg-emerald-500 opacity-60" />
+                  <span class="relative inline-flex size-2 rounded-full" :class="s.status === 'connected' ? 'bg-emerald-500' : s.status === 'pairing' ? 'bg-sky-500' : 'bg-muted-foreground'" />
                 </span>
-                Aktif
+                {{ s.status === 'connected' ? 'Aktif' : s.status }}
               </span>
             </div>
+            <p v-if="sessionsStore.items.length === 0" class="px-1 text-xs text-muted-foreground">
+              Belum ada sesi — buat dari halaman Sessions.
+            </p>
             <p class="px-1 text-xs text-muted-foreground">
-              Manajemen sesi lengkap (pairing QR, disconnect, reconnect) tersedia di halaman Sessions.
+              Manajemen sesi lengkap (pairing QR, disconnect, reconnect) tersedia di
+              <RouterLink :to="{ name: 'sessions' }" class="font-semibold text-emerald-600 dark:text-emerald-300">halaman Sessions</RouterLink>.
             </p>
           </div>
         </section>
@@ -415,10 +568,10 @@ function selectProvider(value: string): void {
                 <SettingSwitch
                   v-for="(_, key) in ai.toolsEnabled"
                   :key="key"
-                  v-model="ai.toolsEnabled[key]"
+                  :model-value="ai.toolsEnabled[key] ?? true"
                   :label="toolLabels[key] ?? key"
                   :description="toolDescriptions[key] ?? 'Aktifkan tool untuk AI.'"
-                  @update:model-value="markDirty"
+                  @update:model-value="(v) => { ai.toolsEnabled[key] = v; markDirty() }"
                 />
               </div>
             </SettingSection>
@@ -444,6 +597,9 @@ function selectProvider(value: string): void {
               <SettingRow label="Perintah / hari" html-for="tier-free-cmd">
                 <Input id="tier-free-cmd" v-model.number="tiers.freeCommandUses" type="number" min="0" :class="inputSoft" @input="markDirty" />
               </SettingRow>
+              <SettingRow label="Grup AI / hari" html-for="tier-free-group">
+                <Input id="tier-free-group" v-model.number="tiers.freeGroupAi" type="number" min="0" :class="inputSoft" @input="markDirty" />
+              </SettingRow>
             </SettingSection>
 
             <SettingSection title="Premium">
@@ -453,15 +609,37 @@ function selectProvider(value: string): void {
               <SettingRow label="Perintah / hari" html-for="tier-premium-cmd">
                 <Input id="tier-premium-cmd" v-model.number="tiers.premiumCommandUses" type="number" min="0" :class="inputSoft" @input="markDirty" />
               </SettingRow>
+              <SettingRow label="Grup AI / hari" html-for="tier-premium-group">
+                <Input id="tier-premium-group" v-model.number="tiers.premiumGroupAi" type="number" min="0" :class="inputSoft" @input="markDirty" />
+              </SettingRow>
             </SettingSection>
 
             <SettingSection title="Pro">
-              <SettingRow label="Chat AI / hari" html-for="tier-pro-ai">
-                <Input id="tier-pro-ai" v-model.number="tiers.proAiChats" type="number" min="0" :class="inputSoft" @input="markDirty" />
-              </SettingRow>
-              <SettingRow label="Perintah / hari" html-for="tier-pro-cmd">
-                <Input id="tier-pro-cmd" v-model.number="tiers.proCommandUses" type="number" min="0" :class="inputSoft" @input="markDirty" />
-              </SettingRow>
+              <div class="rounded-2xl bg-violet-500/10 p-4">
+                <p class="text-sm font-bold text-violet-600 dark:text-violet-300">Unlimited</p>
+                <p class="mt-0.5 text-xs text-muted-foreground">Tier Pro tidak dibatasi — limit harian dinonaktifkan di backend dan tidak bisa diubah dari sini.</p>
+              </div>
+            </SettingSection>
+
+            <SettingSection title="Enforcement" description="Aktif/nonaktifkan penegakan limit harian per fitur.">
+              <SettingSwitch
+                v-model="limitToggles.privateAi"
+                label="Limit AI pribadi"
+                description="Batasi chat AI harian di chat pribadi sesuai tier."
+                @update:model-value="markDirty"
+              />
+              <SettingSwitch
+                v-model="limitToggles.groupAi"
+                label="Limit AI grup"
+                description="Batasi auto-reply AI harian di grup sesuai tier."
+                @update:model-value="markDirty"
+              />
+              <SettingSwitch
+                v-model="limitToggles.command"
+                label="Limit perintah"
+                description="Batasi penggunaan perintah harian sesuai tier."
+                @update:model-value="markDirty"
+              />
             </SettingSection>
           </div>
         </section>
@@ -589,7 +767,7 @@ function selectProvider(value: string): void {
             </div>
           </div>
           <div class="mt-6 space-y-6">
-            <SettingRow label="PIN Dashboard" description="PIN akan diminta setiap kali dashboard dibuka di peramban baru." html-for="pin">
+            <SettingRow label="PIN Dashboard" description="PIN lokal peramban ini — disimpan di perangkat, tidak dikirim ke server." html-for="pin">
               <Input id="pin" v-model="security.dashboardPin" type="password" placeholder="••••••" :class="cn(inputSoft, 'font-mono tracking-widest')" @input="markDirty" />
             </SettingRow>
             <SettingRow label="Rate Limit" description="Batas pesan per pengguna per menit." html-for="rate-limit">
@@ -614,6 +792,7 @@ function selectProvider(value: string): void {
         </section>
 
         <!-- Footer actions -->
+        <p v-if="saveNote || loadError" class="pt-1 text-right text-xs font-semibold text-muted-foreground">{{ saveNote || loadError }}</p>
         <div v-if="activeSection !== 'appearance'" class="flex items-center justify-end gap-2 pt-1">
           <button
             :disabled="!unsaved"
@@ -623,12 +802,12 @@ function selectProvider(value: string): void {
             Reset
           </button>
           <button
-            :disabled="!unsaved"
+            :disabled="!unsaved || saving"
             @click="saveAll"
             class="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-design hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Save class="size-4" />
-            Simpan Perubahan
+            {{ saving ? 'Menyimpan…' : 'Simpan Perubahan' }}
           </button>
         </div>
         <div v-else class="flex items-center justify-end gap-2 pt-1">

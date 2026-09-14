@@ -31,13 +31,14 @@ model Message {
   key       Json
   message   Json
   messageTimestamp BigInt
-  
+
   fromMe    Boolean
   pushName  String?
-  
+
   createdAt DateTime @default(now())
-  
+
   @@index([sessionId])
+  @@index([createdAt])
 }
 
 model BotConfig {
@@ -124,4 +125,64 @@ model UsageLog {
   @@unique([userId, date])
   @@index([userId])
   @@index([date])
+}
+
+// ─── Dashboard Activity & Command Logs ─────────────────────────────
+model ActivityEvent {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  type      String
+  sessionId String?
+  session   String?
+  detail    String
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([type, createdAt])
+  @@index([sessionId, createdAt])
+}
+
+model CommandLog {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  sessionId String?
+  userId    String?
+  command   String
+  args      String?
+  success   Boolean  @default(true)
+  latencyMs Int?
+  createdAt DateTime @default(now())
+
+  @@index([sessionId, createdAt])
+  @@index([command, createdAt])
+  @@index([createdAt])
+}
+
+model ToolCallLog {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  sessionId String?
+  userId    String?
+  tool      String
+  args      String?
+  success   Boolean  @default(true)
+  cached    Boolean  @default(false)
+  latencyMs Int?
+  createdAt DateTime @default(now())
+
+  @@index([sessionId, createdAt])
+  @@index([tool, createdAt])
+  @@index([createdAt])
+}
+
+model HttpLog {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  method     String
+  path       String
+  status     Int
+  durationMs Int?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([method, createdAt])
+  @@index([status, createdAt])
 }

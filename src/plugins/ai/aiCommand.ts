@@ -78,7 +78,7 @@ const AICommand: CommandModule = {
         info +=
           "\n\nGunakan `!ai model <nama model>` untuk mengganti (hanya owner).";
       } else if (provider === "openai" || provider === "other") {
-        // OpenAI-compatible custom API — coba fetch dari endpoint /models
+        // OpenAI-compatible custom API — try fetching from the /models endpoint
         models = await AIService.getAvailableModels(provider);
         if (models.length === 0) {
           info =
@@ -135,6 +135,8 @@ ${isOwner(userId) ? `• ${context.simplified?.prefix || "!"}ai model <nama mode
         socket: context.socket,
         fromJid: context.fromJid,
         sessionId: userId,
+        waSessionId: context.sessionId,
+        userId,
         pushName: context.simplified?.pushName ?? undefined,
         userMessage: question,
       };
@@ -146,7 +148,7 @@ ${isOwner(userId) ? `• ${context.simplified?.prefix || "!"}ai model <nama mode
         getSystemPrompt(),
         (chunk) => {
           if (chunk.done) return;
-          if (chunk.phase === "progress") return; // jangan tangkap ack sebagai final
+          if (chunk.phase === "progress") return; // don't treat progress ack as final
           if (chunk.content) {
             responseBuffer = chunk.content;
           }
@@ -172,9 +174,9 @@ ${isOwner(userId) ? `• ${context.simplified?.prefix || "!"}ai model <nama mode
 };
 
 /**
- * Periksa apakah AI mode aktif untuk user tertentu.
- * Menggunakan node-cache (sync) — tanpa DB hit. Cache dipopulasi saat startup
- * (via initAIModePersistence) dan di-update write-through saat toggle.
+ * Check whether AI mode is active for a given user.
+ * Uses node-cache (sync) — no DB hit. Cache is populated at startup
+ * (via initAIModePersistence) and updated write-through on toggle.
  */
 export function isAIModeEnabled(userId: string): boolean {
   return isAIModeEnabledSync(userId);

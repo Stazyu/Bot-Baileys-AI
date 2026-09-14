@@ -124,6 +124,11 @@ class RateLimiter {
     }
   }
 
+  /** Ubah cooldown runtime (dipanggil PATCH /api/settings). */
+  configure(patch: Partial<RateLimitConfig>): void {
+    this.config = { ...this.config, ...patch };
+  }
+
   /**
    * Check if a non-command message action is allowed for a user (e.g., AI mode, auto-reply).
    */

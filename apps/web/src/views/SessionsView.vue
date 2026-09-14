@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { Brain, MonitorSmartphone, Plus, Power, QrCode, Search } from '@lucide/vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { Check, Copy, MonitorSmartphone, Plus, Power, QrCode, RefreshCw, Search, Trash2 } from '@lucide/vue'
 import { cn } from '@/lib/utils'
+import { ApiError, api } from '@/lib/api'
+import type { SessionItem, SessionQr, SessionStatus } from '@/lib/api-types'
+import { timeAgo } from '@/lib/format'
+import { useSessionsStore } from '@/stores/sessions'
 import {
   Dialog,
   DialogContent,
@@ -12,117 +16,169 @@ import {
 } from '@/components/ui/dialog'
 import Input from '@/components/ui/input/Input.vue'
 
-type Status = 'connected' | 'connecting' | 'disconnected' | 'pairing'
+const store = useSessionsStore()
 
-interface Session {
-  id: string
-  pushName: string
-  phoneNumber: string
-  status: Status
-  uptime: string
-  lastActive: string
-  messagesIn: number
-  messagesOut: number
-  aiMode: boolean
-  platform: string
-}
-
-const sessions = ref<Session[]>([
-  { id: 'session-01', pushName: 'Wahyu', phoneNumber: '6281234567890', status: 'connected', uptime: '3h 42m', lastActive: 'just now', messagesIn: 341, messagesOut: 89, aiMode: true, platform: 'android' },
-  { id: 'session-02', pushName: 'Bot Support', phoneNumber: '6289876543210', status: 'connected', uptime: '7h 15m', lastActive: '1m ago', messagesIn: 612, messagesOut: 204, aiMode: true, platform: 'ios' },
-  { id: 'session-03', pushName: 'Shop Bot', phoneNumber: '6281112223334', status: 'disconnected', uptime: '—', lastActive: '2h ago', messagesIn: 1284, messagesOut: 402, aiMode: false, platform: 'web' },
-  { id: 'session-04', pushName: 'Test Session', phoneNumber: '6284445556667', status: 'connecting', uptime: '—', lastActive: '—', messagesIn: 0, messagesOut: 0, aiMode: false, platform: 'android' },
-  { id: 'session-05', pushName: 'Premium Bot', phoneNumber: '6287778889990', status: 'pairing', uptime: '—', lastActive: '—', messagesIn: 0, messagesOut: 0, aiMode: true, platform: 'ios' },
-])
+onMounted(() => {
+  if (store.items.length === 0) void store.fetchAll()
+})
 
 const query = ref('')
-const activeFilter = ref<'all' | Status>('all')
+const activeFilter = ref<'all' | SessionStatus>('all')
 
 /* ── modals ── */
 const newOpen = ref(false)
-const form = ref({ name: '', phone: '', platform: 'android', aiMode: true })
-const formValid = computed(() => form.value.name.trim().length > 1 && /^[0-9+]{8,16}$/.test(form.value.phone.trim()))
+const form = ref({ id: '', phone: '' })
+const createError = ref('')
+const confirmTarget = ref<{ session: SessionItem; action: 'disconnect' | 'reconnect' | 'delete' } | null>(null)
+const detailsTarget = ref<SessionItem | null>(null)
+const qrId = ref<string | null>(null)
+const pairPhone = ref('')
+const copied = ref(false)
 
-const confirmTarget = ref<{ session: Session; action: 'disconnect' | 'reconnect' } | null>(null)
-const detailsTarget = ref<Session | null>(null)
-const qrTarget = ref<Session | null>(null)
+const idValid = computed(() => /^[a-zA-Z0-9_-]{2,32}$/.test(form.value.id.trim()))
+const phoneTrimmed = computed(() => form.value.phone.trim())
+const phoneValid = computed(() => phoneTrimmed.value === '' || /^[0-9+]{8,16}$/.test(phoneTrimmed.value))
+const formValid = computed(() => idValid.value && phoneValid.value)
 
-const createSession = (): void => {
-  if (!formValid.value) return
-  sessions.value.unshift({
-    id: `session-${Date.now().toString(36)}`,
-    pushName: form.value.name.trim(),
-    phoneNumber: form.value.phone.trim(),
-    status: 'pairing',
-    uptime: '—',
-    lastActive: '—',
-    messagesIn: 0,
-    messagesOut: 0,
-    aiMode: form.value.aiMode,
-    platform: form.value.platform,
-  })
-  newOpen.value = false
-  form.value = { name: '', phone: '', platform: 'android', aiMode: true }
+async function createSession(): Promise<void> {
+  if (!formValid.value || store.busyId) return
+  createError.value = ''
+  const id = form.value.id.trim()
+  try {
+    await store.create(id, phoneTrimmed.value || undefined)
+    newOpen.value = false
+    form.value = { id: '', phone: '' }
+    qrId.value = id
+  } catch (e) {
+    createError.value = e instanceof ApiError ? e.message : 'Failed to create session'
+  }
 }
 
-const askToggle = (session: Session): void => {
+function askToggle(session: SessionItem): void {
   confirmTarget.value = { session, action: session.status === 'connected' ? 'disconnect' : 'reconnect' }
 }
 
-const doToggle = (): void => {
-  const target = confirmTarget.value
-  if (!target) return
-  target.session.status = target.action === 'disconnect' ? 'disconnected' : 'connected'
-  target.session.uptime = target.action === 'disconnect' ? '—' : 'just now'
-  target.session.lastActive = 'just now'
-  confirmTarget.value = null
+function askDelete(session: SessionItem): void {
+  confirmTarget.value = { session, action: 'delete' }
 }
 
-/* pseudo-QR preview (placeholder until backend streams live codes) */
-const QR_SIZE = 21
-const qrCells = computed(() => {
-  const id = qrTarget.value?.id ?? 'preview'
-  let seed = [...id].reduce((a, c) => a + c.charCodeAt(0), 7)
-  const rand = (): number => {
-    seed = (seed * 9301 + 49297) % 233280
-    return seed / 233280
-  }
-  return Array.from({ length: QR_SIZE * QR_SIZE }, (_, i) => {
-    const x = i % QR_SIZE
-    const y = Math.floor(i / QR_SIZE)
-    if ((x < 8 && y < 8) || (x >= QR_SIZE - 8 && y < 8) || (x < 8 && y >= QR_SIZE - 8)) return false
-    return rand() > 0.52
+// Dari modal Details: tutup dulu, buka konfirmasi di tick berikut.
+// Buka-tutup dua Dialog Radix dalam satu tick membuat dialog kedua tidak mount.
+function askFromDetails(session: SessionItem, action: 'disconnect' | 'reconnect' | 'delete'): void {
+  const snapshot = session
+  detailsTarget.value = null
+  void nextTick(() => {
+    confirmTarget.value = { session: snapshot, action }
   })
+}
+
+async function doConfirm(): Promise<void> {
+  const target = confirmTarget.value
+  if (!target || store.busyId) return
+  try {
+    if (target.action === 'delete') {
+      await store.remove(target.session.id)
+    } else {
+      const action = await store.toggle(target.session)
+      // Reconnect: buka modal link agar user melihat status live — termasuk
+      // QR baru bila sesi butuh scan ulang.
+      if (action === 'reconnect') qrId.value = target.session.id
+    }
+    confirmTarget.value = null
+  } catch {
+    // store.error sudah diisi — dialog tetap terbuka agar user bisa retry/cancel.
+  }
+}
+
+/* ── QR link ── */
+const qrSession = computed(() => store.items.find((s) => s.id === qrId.value) ?? null)
+const qrDataUrl = computed(() => (qrId.value ? store.linkQr[qrId.value] : undefined))
+const pairingCode = computed(() => (qrId.value ? store.linkCode[qrId.value] : undefined))
+const linkState = computed(() => (qrId.value ? store.linkStatus[qrId.value] : undefined))
+
+async function refreshQr(id: string): Promise<void> {
+  try {
+    const qr = await api<SessionQr>(`/api/sessions/${id}/qr`)
+    if (qr.dataUrl) store.linkQr = { ...store.linkQr, [id]: qr.dataUrl }
+  } catch {
+    // WS akan mengirim QR saat tersedia.
+  }
+}
+
+watch(qrId, (id, prev) => {
+  if (prev) store.clearLink(prev)
+  pairPhone.value = ''
+  copied.value = false
+  if (id) {
+    const session = store.items.find((s) => s.id === id)
+    if (session?.phoneNumber) pairPhone.value = session.phoneNumber
+    store.connectLink(id)
+    void refreshQr(id)
+  }
 })
 
+function requestPairing(): void {
+  const phone = pairPhone.value.trim()
+  if (!phone) return
+  copied.value = false
+  store.requestPairing(phone)
+}
+
+function closeQr(): void {
+  if (qrId.value && store.linkStatus[qrId.value] === 'connected') void store.fetchAll()
+  qrId.value = null
+}
+
+// Device terhubung → beri jeda lihat status sukses, lalu tutup + refresh list.
+watch(linkState, (state) => {
+  const id = qrId.value
+  if (id && state === 'connected') {
+    window.setTimeout(() => {
+      if (qrId.value === id) closeQr()
+    }, 1500)
+  }
+})
+
+async function copyCode(): Promise<void> {
+  const code = pairingCode.value
+  if (!code) return
+  try {
+    await navigator.clipboard.writeText(code)
+    copied.value = true
+  } catch {
+    copied.value = false
+  }
+}
+
+
+/* ── list ── */
 const filters = computed(() => {
-  const counts: Record<string, number> = { all: sessions.value.length }
-  for (const s of sessions.value) counts[s.status] = (counts[s.status] ?? 0) + 1
+  const counts: Record<string, number> = { all: store.items.length }
+  for (const s of store.items) counts[s.status] = (counts[s.status] ?? 0) + 1
   return [
     { key: 'all', label: 'All', count: counts.all },
     { key: 'connected', label: 'Connected', count: counts.connected ?? 0 },
-    { key: 'pairing', label: 'Pairing', count: (counts.pairing ?? 0) + (counts.connecting ?? 0) },
+    { key: 'pairing', label: 'Pairing', count: counts.pairing ?? 0 },
     { key: 'disconnected', label: 'Offline', count: counts.disconnected ?? 0 },
   ] as const
 })
 
 const visible = computed(() => {
   const q = query.value.trim().toLowerCase()
-  return sessions.value.filter((s) => {
-    const matchStatus
-      = activeFilter.value === 'all'
-        || s.status === activeFilter.value
-        || (activeFilter.value === 'pairing' && s.status === 'connecting')
+  return store.items.filter((s) => {
+    const matchStatus = activeFilter.value === 'all' || s.status === activeFilter.value
     const matchQuery
       = !q
-        || s.pushName.toLowerCase().includes(q)
-        || s.phoneNumber.includes(q)
+        || s.id.toLowerCase().includes(q)
+        || (s.phoneNumber ?? '').includes(q)
     return matchStatus && matchQuery
   })
 })
 
-const statusPill = (status: Status): string => {
-  const map: Record<Status, string> = {
+const connectedCount = computed(() => store.items.filter((s) => s.status === 'connected').length)
+
+const statusPill = (status: SessionStatus): string => {
+  const map: Record<SessionStatus, string> = {
     connected: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300',
     connecting: 'bg-amber-500/10 text-amber-600 dark:text-amber-300',
     disconnected: 'bg-rose-500/10 text-rose-600 dark:text-rose-300',
@@ -131,8 +187,8 @@ const statusPill = (status: Status): string => {
   return map[status]
 }
 
-const statusDot = (status: Status): string => {
-  const map: Record<Status, string> = {
+const statusDot = (status: SessionStatus): string => {
+  const map: Record<SessionStatus, string> = {
     connected: 'bg-emerald-500',
     connecting: 'bg-amber-500 animate-pulse',
     disconnected: 'bg-rose-500',
@@ -142,7 +198,9 @@ const statusDot = (status: Status): string => {
 }
 
 const initials = (name: string): string =>
-  name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+  name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()
+
+const displayOf = (s: SessionItem): string => s.phoneNumber ?? s.id
 
 const fieldLabel = 'mb-1.5 block text-xs font-semibold text-muted-foreground'
 </script>
@@ -155,7 +213,7 @@ const fieldLabel = 'mb-1.5 block text-xs font-semibold text-muted-foreground'
         <p class="text-eyebrow text-muted-foreground">Fleet</p>
         <h2 class="mt-1 text-2xl font-bold tracking-tight">Sessions</h2>
         <p class="mt-1 text-sm text-muted-foreground">
-          {{ sessions.filter(s => s.status === 'connected').length }} of {{ sessions.length }} WhatsApp sessions online.
+          {{ connectedCount }} of {{ store.items.length }} WhatsApp sessions online.
         </p>
       </div>
       <button
@@ -167,140 +225,143 @@ const fieldLabel = 'mb-1.5 block text-xs font-semibold text-muted-foreground'
       </button>
     </div>
 
-    <!-- Search + filters -->
-    <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
-      <div class="relative w-full lg:max-w-xs">
-        <Search class="absolute top-1/2 left-4 size-4 -translate-y-1/2 text-muted-foreground" />
-        <input
-          v-model="query"
-          type="search"
-          placeholder="Search name or number…"
-          class="w-full rounded-full bg-card py-2.5 pr-4 pl-11 text-sm shadow-soft outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-emerald-500/40"
-        />
-      </div>
-      <div class="flex flex-wrap items-center gap-2">
-        <button
-          v-for="f in filters"
-          :key="f.key"
-          :aria-pressed="activeFilter === f.key"
-          @click="activeFilter = f.key"
-          :class="cn(
-            'inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold transition-design',
-            activeFilter === f.key
-              ? 'bg-foreground text-background'
-              : 'bg-card text-muted-foreground shadow-soft hover:text-foreground',
-          )"
-        >
-          {{ f.label }}
-          <span :class="cn('tabular-nums', activeFilter === f.key ? 'opacity-70' : 'text-muted-foreground/70')">{{ f.count }}</span>
-        </button>
-      </div>
-    </div>
-
-    <!-- Cards -->
-    <div v-if="visible.length" class="grid grid-cols-1 gap-5 xl:grid-cols-2">
-      <article
-        v-for="session in visible"
-        :key="session.id"
-        class="card-lift rounded-[24px] bg-card p-6 shadow-soft hover:shadow-lift"
-      >
-        <div class="flex items-start gap-4">
-          <span class="flex size-13 shrink-0 items-center justify-center rounded-full bg-primary/[0.07] p-3.5 text-sm font-bold text-primary">
-            {{ initials(session.pushName) }}
-          </span>
-          <div class="min-w-0 flex-1">
-            <div class="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-              <h3 class="truncate text-base font-bold tracking-tight">{{ session.pushName }}</h3>
-              <span :class="cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold', statusPill(session.status))">
-                <span :class="cn('size-1.5 rounded-full', statusDot(session.status))" />
-                {{ session.status }}
-              </span>
-              <span v-if="session.aiMode" class="inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-2 py-0.5 text-[11px] font-semibold text-violet-600 dark:text-violet-300">
-                <Brain class="size-3" />
-                AI
-              </span>
-            </div>
-            <p class="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-              <span class="font-mono">{{ session.phoneNumber }}</span>
-              <span aria-hidden="true">·</span>
-              <span class="inline-flex items-center gap-1 capitalize">
-                <MonitorSmartphone class="size-3" />
-                {{ session.platform }}
-              </span>
-              <span aria-hidden="true">·</span>
-              <span>active {{ session.lastActive }}</span>
-            </p>
-          </div>
-          <button
-            v-if="session.status === 'pairing'"
-            @click="qrTarget = session"
-            class="flex size-11 shrink-0 items-center justify-center rounded-full bg-sky-500/10 text-sky-600 transition-design hover:bg-sky-500/20 dark:text-sky-300"
-            :aria-label="`Show QR for ${session.pushName}`"
-          >
-            <QrCode class="size-5" />
-          </button>
-        </div>
-
-        <dl class="mt-5 grid grid-cols-3 gap-2 text-center">
-          <div class="rounded-2xl bg-muted/50 px-2 py-3">
-            <dd class="text-lg font-bold tabular-nums">{{ session.messagesIn.toLocaleString() }}</dd>
-            <dt class="mt-0.5 text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">Received</dt>
-          </div>
-          <div class="rounded-2xl bg-muted/50 px-2 py-3">
-            <dd class="text-lg font-bold tabular-nums">{{ session.messagesOut.toLocaleString() }}</dd>
-            <dt class="mt-0.5 text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">Sent</dt>
-          </div>
-          <div class="rounded-2xl bg-muted/50 px-2 py-3">
-            <dd class="text-lg font-bold tabular-nums">{{ session.uptime }}</dd>
-            <dt class="mt-0.5 text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">Uptime</dt>
-          </div>
-        </dl>
-
-        <div class="mt-5 flex flex-wrap items-center gap-2">
-          <button
-            v-if="session.status === 'connected'"
-            @click="askToggle(session)"
-            class="inline-flex items-center gap-1.5 rounded-full bg-rose-500/10 px-4 py-2 text-xs font-semibold text-rose-600 transition-design hover:bg-rose-500/20 dark:text-rose-300"
-          >
-            <Power class="size-3.5" />
-            Disconnect
-          </button>
-          <button
-            v-else-if="session.status === 'disconnected'"
-            @click="askToggle(session)"
-            class="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-4 py-2 text-xs font-semibold text-emerald-600 transition-design hover:bg-emerald-500/20 dark:text-emerald-300"
-          >
-            <Power class="size-3.5" />
-            Reconnect
-          </button>
-          <button
-            v-else
-            class="inline-flex items-center gap-1.5 rounded-full bg-muted px-4 py-2 text-xs font-semibold text-muted-foreground"
-            disabled
-          >
-            {{ session.status === 'pairing' ? 'Waiting for scan…' : 'Connecting…' }}
-          </button>
-          <button
-            @click="detailsTarget = session"
-            class="ml-auto rounded-full px-4 py-2 text-xs font-semibold text-muted-foreground transition-design hover:bg-muted hover:text-foreground"
-          >
-            Details
-          </button>
-        </div>
-      </article>
-    </div>
-
-    <!-- Empty state -->
-    <div v-else class="flex flex-col items-center rounded-[24px] bg-card px-6 py-16 text-center shadow-soft">
-      <span class="flex size-14 items-center justify-center rounded-full bg-muted">
-        <Search class="size-6 text-muted-foreground" />
-      </span>
-      <p class="mt-4 text-base font-bold">No sessions found</p>
-      <p class="mt-1 max-w-xs text-sm text-muted-foreground">Try a different name, number, or status filter.</p>
-      <button @click="query = ''; activeFilter = 'all'" class="mt-5 rounded-full bg-muted px-5 py-2 text-xs font-semibold transition-design hover:text-foreground">
-        Clear filters
+    <div v-if="store.error && store.items.length === 0" class="rounded-[24px] bg-card p-6 text-center shadow-soft">
+      <p class="text-sm font-semibold">Couldn't load sessions</p>
+      <p class="mt-1 text-xs text-muted-foreground">{{ store.error }}</p>
+      <button @click="store.fetchAll()" class="mt-4 rounded-full bg-muted px-5 py-2 text-xs font-semibold transition-design hover:text-foreground">
+        Retry
       </button>
     </div>
+
+    <template v-else>
+      <!-- Search + filters -->
+      <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
+        <div class="relative w-full lg:max-w-xs">
+          <Search class="absolute top-1/2 left-4 size-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            v-model="query"
+            type="search"
+            placeholder="Search id or number…"
+            class="w-full rounded-full bg-card py-2.5 pr-4 pl-11 text-sm shadow-soft outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-emerald-500/40"
+          />
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <button
+            v-for="f in filters"
+            :key="f.key"
+            :aria-pressed="activeFilter === f.key"
+            @click="activeFilter = f.key"
+            :class="cn(
+              'inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold transition-design',
+              activeFilter === f.key
+                ? 'bg-foreground text-background'
+                : 'bg-card text-muted-foreground shadow-soft hover:text-foreground',
+            )"
+          >
+            {{ f.label }}
+            <span :class="cn('tabular-nums', activeFilter === f.key ? 'opacity-70' : 'text-muted-foreground/70')">{{ f.count }}</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Cards -->
+      <div v-if="visible.length" class="grid grid-cols-1 gap-5 xl:grid-cols-2">
+        <article
+          v-for="session in visible"
+          :key="session.id"
+          class="card-lift rounded-[24px] bg-card p-6 shadow-soft hover:shadow-lift"
+        >
+          <div class="flex items-start gap-4">
+            <span class="flex size-13 shrink-0 items-center justify-center rounded-full bg-primary/[0.07] p-3.5 font-mono text-xs font-bold text-primary">
+              {{ initials(displayOf(session)) }}
+            </span>
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                <h3 class="truncate font-mono text-base font-bold tracking-tight">{{ displayOf(session) }}</h3>
+                <span :class="cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold', statusPill(session.status))">
+                  <span :class="cn('size-1.5 rounded-full', statusDot(session.status))" />
+                  {{ session.status }}
+                </span>
+              </div>
+              <p class="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                <span class="font-mono">{{ session.id }}</span>
+                <span aria-hidden="true">·</span>
+                <span>active {{ session.lastActive ? timeAgo(session.lastActive) : '—' }}</span>
+              </p>
+            </div>
+            <button
+              v-if="session.status === 'pairing' || session.status === 'disconnected'"
+              @click="qrId = session.id"
+              class="flex size-11 shrink-0 items-center justify-center rounded-full bg-sky-500/10 text-sky-600 transition-design hover:bg-sky-500/20 dark:text-sky-300"
+              :aria-label="`Show QR for ${displayOf(session)}`"
+            >
+              <QrCode class="size-5" />
+            </button>
+          </div>
+
+          <dl class="mt-5 grid grid-cols-3 gap-2 text-center">
+            <div class="rounded-2xl bg-muted/50 px-2 py-3">
+              <dd class="text-lg font-bold tabular-nums">{{ session.messagesIn.toLocaleString() }}</dd>
+              <dt class="mt-0.5 text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">Received</dt>
+            </div>
+            <div class="rounded-2xl bg-muted/50 px-2 py-3">
+              <dd class="text-lg font-bold tabular-nums">{{ session.messagesOut.toLocaleString() }}</dd>
+              <dt class="mt-0.5 text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">Sent</dt>
+            </div>
+            <div class="rounded-2xl bg-muted/50 px-2 py-3">
+              <dd class="text-lg font-bold tabular-nums">{{ session.uptime }}</dd>
+              <dt class="mt-0.5 text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">Uptime</dt>
+            </div>
+          </dl>
+
+          <div class="mt-5 flex flex-wrap items-center gap-2">
+            <button
+              v-if="session.status === 'connected'"
+              @click="askToggle(session)"
+              :disabled="store.busyId === session.id"
+              class="inline-flex items-center gap-1.5 rounded-full bg-rose-500/10 px-4 py-2 text-xs font-semibold text-rose-600 transition-design hover:bg-rose-500/20 disabled:opacity-50 dark:text-rose-300"
+            >
+              <Power class="size-3.5" />
+              Disconnect
+            </button>
+            <button
+              v-else-if="session.status === 'disconnected'"
+              @click="askToggle(session)"
+              :disabled="store.busyId === session.id"
+              class="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-4 py-2 text-xs font-semibold text-emerald-600 transition-design hover:bg-emerald-500/20 disabled:opacity-50 dark:text-emerald-300"
+            >
+              <Power class="size-3.5" />
+              Reconnect
+            </button>
+            <button
+              v-else
+              class="inline-flex items-center gap-1.5 rounded-full bg-muted px-4 py-2 text-xs font-semibold text-muted-foreground"
+              disabled
+            >
+              {{ session.status === 'pairing' ? 'Waiting for scan…' : 'Connecting…' }}
+            </button>
+            <button
+              @click="detailsTarget = session"
+              class="ml-auto rounded-full px-4 py-2 text-xs font-semibold text-muted-foreground transition-design hover:bg-muted hover:text-foreground"
+            >
+              Details
+            </button>
+          </div>
+        </article>
+      </div>
+
+      <!-- Empty state -->
+      <div v-else class="flex flex-col items-center rounded-[24px] bg-card px-6 py-16 text-center shadow-soft">
+        <span class="flex size-14 items-center justify-center rounded-full bg-muted">
+          <Search class="size-6 text-muted-foreground" />
+        </span>
+        <p class="mt-4 text-base font-bold">No sessions found</p>
+        <p class="mt-1 max-w-xs text-sm text-muted-foreground">Try a different id, number, or status filter.</p>
+        <button @click="query = ''; activeFilter = 'all'" class="mt-5 rounded-full bg-muted px-5 py-2 text-xs font-semibold transition-design hover:text-foreground">
+          Clear filters
+        </button>
+      </div>
+    </template>
 
     <!-- ══ New session modal ══ -->
     <Dialog :open="newOpen" @update:open="newOpen = $event">
@@ -308,47 +369,22 @@ const fieldLabel = 'mb-1.5 block text-xs font-semibold text-muted-foreground'
         <DialogHeader>
           <p class="text-eyebrow text-muted-foreground">Fleet</p>
           <DialogTitle class="mt-1">New session</DialogTitle>
-          <DialogDescription>Register a number. You'll pair it by scanning a QR code next.</DialogDescription>
+          <DialogDescription>Register an id. You'll pair it by scanning a QR code next.</DialogDescription>
         </DialogHeader>
         <div class="space-y-4">
           <div>
-            <label for="ns-name" :class="fieldLabel">Display name</label>
-            <Input id="ns-name" v-model="form.name" placeholder="e.g. Shop Bot" class="rounded-2xl" />
+            <label for="ns-name" :class="fieldLabel">Session id</label>
+            <Input id="ns-name" v-model="form.id" placeholder="e.g. shop-bot" class="rounded-2xl font-mono" />
+            <p class="mt-1 text-[11px] text-muted-foreground">Letters, numbers, dash, underscore · 2–32 chars.</p>
           </div>
           <div>
-            <label for="ns-phone" :class="fieldLabel">WhatsApp number</label>
+            <label for="ns-phone" :class="fieldLabel">WhatsApp number (optional)</label>
             <Input id="ns-phone" v-model="form.phone" inputmode="tel" placeholder="e.g. 6281234567890" class="rounded-2xl font-mono" />
+            <p class="mt-1 text-[11px] text-muted-foreground">Needed for pairing-code login without camera scan.</p>
           </div>
-          <div>
-            <span :class="fieldLabel">Platform</span>
-            <div class="flex gap-2">
-              <button
-                v-for="p in ['android', 'ios', 'web']"
-                :key="p"
-                @click="form.platform = p"
-                :aria-pressed="form.platform === p"
-                :class="cn(
-                  'flex-1 rounded-2xl px-3 py-2 text-xs font-semibold capitalize transition-design',
-                  form.platform === p ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground hover:text-foreground',
-                )"
-              >
-                {{ p }}
-              </button>
-            </div>
-          </div>
-          <button
-            @click="form.aiMode = !form.aiMode"
-            :aria-pressed="form.aiMode"
-            class="flex w-full items-center gap-3 rounded-2xl bg-muted/50 px-4 py-3 text-left"
-          >
-            <span :class="cn('relative h-6 w-11 shrink-0 rounded-full transition-design', form.aiMode ? 'bg-emerald-500' : 'bg-muted-foreground/30')">
-              <span :class="cn('absolute top-0.5 size-5 rounded-full bg-white transition-design', form.aiMode ? 'left-[22px]' : 'left-0.5')" />
-            </span>
-            <span>
-              <span class="block text-sm font-semibold">AI mode</span>
-              <span class="block text-xs text-muted-foreground">Auto-reply with AI when enabled</span>
-            </span>
-          </button>
+          <p v-if="createError" class="rounded-2xl bg-rose-500/10 px-4 py-2.5 text-xs font-semibold text-rose-600 dark:text-rose-300">
+            {{ createError }}
+          </p>
         </div>
         <DialogFooter>
           <button @click="newOpen = false" class="rounded-full px-5 py-2.5 text-sm font-semibold text-muted-foreground transition-design hover:bg-muted hover:text-foreground">
@@ -356,29 +392,33 @@ const fieldLabel = 'mb-1.5 block text-xs font-semibold text-muted-foreground'
           </button>
           <button
             @click="createSession"
-            :disabled="!formValid"
+            :disabled="!formValid || !!store.busyId"
             class="rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-design hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            Create session
+            {{ store.busyId ? 'Creating…' : 'Create session' }}
           </button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
 
-    <!-- ══ Disconnect / reconnect confirm ══ -->
+    <!-- ══ Disconnect / reconnect / delete confirm ══ -->
     <Dialog :open="confirmTarget !== null" @update:open="!$event && (confirmTarget = null)">
       <DialogContent class="sm:max-w-sm">
         <DialogHeader v-if="confirmTarget">
-          <p class="text-eyebrow" :class="confirmTarget.action === 'disconnect' ? 'text-rose-500' : 'text-emerald-500'">
-            {{ confirmTarget.action === 'disconnect' ? 'Disconnect' : 'Reconnect' }}
+          <p class="text-eyebrow" :class="confirmTarget.action === 'disconnect' || confirmTarget.action === 'delete' ? 'text-rose-500' : 'text-emerald-500'">
+            {{ confirmTarget.action === 'disconnect' ? 'Disconnect' : confirmTarget.action === 'delete' ? 'Delete' : 'Reconnect' }}
           </p>
           <DialogTitle class="mt-1">
-            {{ confirmTarget.action === 'disconnect' ? 'Take session offline?' : 'Bring session back?' }}
+            {{ confirmTarget.action === 'disconnect' ? 'Take session offline?' : confirmTarget.action === 'delete' ? 'Delete this session?' : 'Bring session back?' }}
           </DialogTitle>
           <DialogDescription>
-            <span class="font-semibold text-foreground">{{ confirmTarget.session.pushName }}</span>
-            ({{ confirmTarget.session.phoneNumber }})
-            {{ confirmTarget.action === 'disconnect' ? 'will stop receiving and replying until reconnected.' : 'will resume receiving and replying.' }}
+            <span class="font-mono font-semibold text-foreground">{{ displayOf(confirmTarget.session) }}</span>
+            ({{ confirmTarget.session.id }})
+            {{ confirmTarget.action === 'disconnect'
+              ? 'will stop receiving and replying until reconnected.'
+              : confirmTarget.action === 'delete'
+                ? 'will disconnect and remove it from the fleet.'
+                : 'will resume receiving and replying.' }}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
@@ -386,15 +426,17 @@ const fieldLabel = 'mb-1.5 block text-xs font-semibold text-muted-foreground'
             Cancel
           </button>
           <button
-            @click="doToggle"
+            @click="doConfirm"
+            :disabled="!!store.busyId"
             :class="cn(
-              'rounded-full px-5 py-2.5 text-sm font-semibold text-white transition-design hover:opacity-90',
-              confirmTarget?.action === 'disconnect' ? 'bg-rose-500' : 'bg-emerald-500',
+              'rounded-full px-5 py-2.5 text-sm font-semibold text-white transition-design hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50',
+              confirmTarget?.action === 'reconnect' ? 'bg-emerald-500' : 'bg-rose-500',
             )"
           >
-            {{ confirmTarget?.action === 'disconnect' ? 'Disconnect' : 'Reconnect' }}
+            {{ store.busyId ? 'Working…' : confirmTarget?.action === 'disconnect' ? 'Disconnect' : confirmTarget?.action === 'delete' ? 'Delete' : 'Reconnect' }}
           </button>
         </DialogFooter>
+        <p v-if="store.error" class="mt-2 text-xs font-semibold text-rose-500">{{ store.error }}</p>
       </DialogContent>
     </Dialog>
 
@@ -403,12 +445,12 @@ const fieldLabel = 'mb-1.5 block text-xs font-semibold text-muted-foreground'
       <DialogContent v-if="detailsTarget" class="sm:max-w-md">
         <DialogHeader>
           <div class="flex items-center gap-3">
-            <span class="flex size-12 shrink-0 items-center justify-center rounded-full bg-primary/[0.07] text-sm font-bold text-primary">
-              {{ initials(detailsTarget.pushName) }}
+            <span class="flex size-12 shrink-0 items-center justify-center rounded-full bg-primary/[0.07] font-mono text-xs font-bold text-primary">
+              {{ initials(displayOf(detailsTarget)) }}
             </span>
             <div class="min-w-0">
-              <DialogTitle class="truncate">{{ detailsTarget.pushName }}</DialogTitle>
-              <DialogDescription class="font-mono">{{ detailsTarget.phoneNumber }}</DialogDescription>
+              <DialogTitle class="truncate font-mono">{{ displayOf(detailsTarget) }}</DialogTitle>
+              <DialogDescription class="font-mono">{{ detailsTarget.id }}</DialogDescription>
             </div>
           </div>
         </DialogHeader>
@@ -417,13 +459,9 @@ const fieldLabel = 'mb-1.5 block text-xs font-semibold text-muted-foreground'
             <span :class="cn('size-1.5 rounded-full', statusDot(detailsTarget.status))" />
             {{ detailsTarget.status }}
           </span>
-          <span v-if="detailsTarget.aiMode" class="inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-3 py-1 text-xs font-semibold text-violet-600 dark:text-violet-300">
-            <Brain class="size-3" />
-            AI mode on
-          </span>
-          <span class="inline-flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground capitalize">
+          <span class="inline-flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground">
             <MonitorSmartphone class="size-3" />
-            {{ detailsTarget.platform }}
+            WhatsApp
           </span>
         </div>
         <dl class="grid grid-cols-2 gap-2 text-center">
@@ -440,17 +478,25 @@ const fieldLabel = 'mb-1.5 block text-xs font-semibold text-muted-foreground'
             <dt class="mt-0.5 text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">Uptime</dt>
           </div>
           <div class="rounded-2xl bg-muted/50 px-2 py-3">
-            <dd class="text-lg font-bold tabular-nums">{{ detailsTarget.lastActive }}</dd>
+            <dd class="text-lg font-bold tabular-nums">{{ detailsTarget.lastActive ? timeAgo(detailsTarget.lastActive) : '—' }}</dd>
             <dt class="mt-0.5 text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">Last active</dt>
           </div>
         </dl>
-        <DialogFooter>
+        <DialogFooter class="flex-wrap">
+          <button
+            @click="detailsTarget && askFromDetails(detailsTarget, 'delete')"
+            class="inline-flex items-center gap-1.5 rounded-full px-5 py-2.5 text-sm font-semibold text-rose-600 transition-design hover:bg-rose-500/10 dark:text-rose-300"
+          >
+            <Trash2 class="size-4" />
+            Delete
+          </button>
+          <span class="flex-1" />
           <button @click="detailsTarget = null" class="rounded-full px-5 py-2.5 text-sm font-semibold text-muted-foreground transition-design hover:bg-muted hover:text-foreground">
             Close
           </button>
           <button
             v-if="detailsTarget.status === 'connected' || detailsTarget.status === 'disconnected'"
-            @click="askToggle(detailsTarget); detailsTarget = null"
+            @click="detailsTarget && askFromDetails(detailsTarget, detailsTarget.status === 'connected' ? 'disconnect' : 'reconnect')"
             :class="cn(
               'rounded-full px-5 py-2.5 text-sm font-semibold transition-design hover:opacity-90',
               detailsTarget.status === 'connected'
@@ -464,38 +510,56 @@ const fieldLabel = 'mb-1.5 block text-xs font-semibold text-muted-foreground'
       </DialogContent>
     </Dialog>
 
-    <!-- ══ Pairing QR ══ -->
-    <Dialog :open="qrTarget !== null" @update:open="!$event && (qrTarget = null)">
-      <DialogContent v-if="qrTarget" class="sm:max-w-sm">
+    <!-- ══ Pairing QR + code ══ -->
+    <Dialog :open="qrId !== null" @update:open="!$event && closeQr()">
+      <DialogContent v-if="qrSession" class="sm:max-w-sm">
         <DialogHeader>
           <p class="text-eyebrow text-sky-500">Pair device</p>
-          <DialogTitle class="mt-1">{{ qrTarget.pushName }}</DialogTitle>
-          <DialogDescription>Scan with WhatsApp → Linked devices → Link a device.</DialogDescription>
+          <DialogTitle class="mt-1 font-mono">{{ displayOf(qrSession) }}</DialogTitle>
+          <DialogDescription>Scan with WhatsApp → Linked devices → Link a device. Or use a pairing code below.</DialogDescription>
         </DialogHeader>
         <div class="mx-auto w-fit rounded-[20px] bg-white p-4 shadow-soft">
-          <div class="relative aspect-square w-52" role="img" :aria-label="`Pairing code preview for ${qrTarget.pushName}`">
-            <div
-              class="absolute inset-0 grid"
-              :style="{ gridTemplateColumns: `repeat(${QR_SIZE}, 1fr)`, gridTemplateRows: `repeat(${QR_SIZE}, 1fr)` }"
-            >
-              <span v-for="(on, i) in qrCells" :key="i" :class="on ? 'bg-[#051321]' : 'bg-transparent'" />
-            </div>
-            <span aria-hidden="true" class="absolute top-0 left-0 grid size-[33.3%] place-items-center bg-white">
-              <span class="grid size-full place-items-center rounded-[20%] bg-[#051321]"><span class="grid size-[60%] place-items-center bg-white"><span class="size-[55%] bg-[#051321]" /></span></span>
-            </span>
-            <span aria-hidden="true" class="absolute top-0 right-0 grid size-[33.3%] place-items-center bg-white">
-              <span class="grid size-full place-items-center rounded-[20%] bg-[#051321]"><span class="grid size-[60%] place-items-center bg-white"><span class="size-[55%] bg-[#051321]" /></span></span>
-            </span>
-            <span aria-hidden="true" class="absolute bottom-0 left-0 grid size-[33.3%] place-items-center bg-white">
-              <span class="grid size-full place-items-center rounded-[20%] bg-[#051321]"><span class="grid size-[60%] place-items-center bg-white"><span class="size-[55%] bg-[#051321]" /></span></span>
-            </span>
+          <img
+            v-if="qrDataUrl"
+            :src="qrDataUrl"
+            alt="WhatsApp pairing QR"
+            class="aspect-square w-52 rounded-lg"
+          />
+          <div v-else class="grid aspect-square w-52 animate-pulse place-items-center rounded-lg bg-muted">
+            <QrCode class="size-10 text-muted-foreground" />
           </div>
         </div>
         <p class="rounded-2xl bg-muted/50 px-4 py-2.5 text-center text-xs text-muted-foreground">
-          Preview layout — live QR arrives with backend integration.
+          {{ linkState === 'connected' ? 'Device linked — you can close this.' : qrDataUrl ? 'QR refreshes automatically until linked.' : 'Waiting for QR from WhatsApp…' }}
         </p>
+        <div class="space-y-2 rounded-2xl bg-muted/50 p-4">
+          <p class="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">Pairing code</p>
+          <div v-if="pairingCode" class="flex items-center gap-2">
+            <code class="flex-1 rounded-xl bg-background px-4 py-2.5 text-center font-mono text-lg font-bold tracking-[0.2em] shadow-soft">{{ pairingCode }}</code>
+            <button
+              @click="copyCode"
+              aria-label="Copy pairing code"
+              class="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-design hover:text-foreground"
+            >
+              <Check v-if="copied" class="size-4 text-emerald-500" />
+              <Copy v-else class="size-4" />
+            </button>
+          </div>
+          <div v-else class="flex gap-2">
+            <Input v-model="pairPhone" inputmode="tel" placeholder="6281234567890" class="rounded-xl font-mono" />
+            <button
+              @click="requestPairing"
+              :disabled="!pairPhone.trim()"
+              class="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-sky-500/10 px-4 py-2 text-xs font-semibold text-sky-600 transition-design hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40 dark:text-sky-300"
+            >
+              <RefreshCw class="size-3.5" />
+              Get code
+            </button>
+          </div>
+        </div>
+        <p v-if="store.linkError" class="text-center text-xs font-semibold text-rose-500">{{ store.linkError }}</p>
         <DialogFooter>
-          <button @click="qrTarget = null" class="w-full rounded-full bg-muted px-5 py-2.5 text-sm font-semibold transition-design hover:text-foreground">
+          <button @click="closeQr" class="w-full rounded-full bg-muted px-5 py-2.5 text-sm font-semibold transition-design hover:text-foreground">
             Done
           </button>
         </DialogFooter>

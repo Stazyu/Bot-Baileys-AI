@@ -12,6 +12,7 @@ import { Boom } from '@hapi/boom';
 import prisma from '../database/prisma.js';
 import { usePrismaAuthState } from '../libs/baileys/usePrismaAuthState.js';
 import { log } from '../utils/logger.js';
+import { bus } from '../server/events.js';
 import QRCode from 'qrcode';
 import NodeCache from 'node-cache';
 
@@ -30,6 +31,10 @@ export class SessionManager {
   private sessionCallbacks: SessionCallback[] = [];
   private disconnectCallbacks: SessionDisconnectCallback[] = [];
   private saveCredsMap: Map<string, () => Promise<void>> = new Map();
+  private lastQr = new Map<string, { qr: string; at: Date }>();
+  // Sessions shut down manually (dashboard / command) — a plain close from end()
+  // must NOT trigger the auto-reconnect loop.
+  private manualOffline = new Set<string>();
   private logger = pino(
     { level: 'silent' },
     pinoPretty({
@@ -41,6 +46,8 @@ export class SessionManager {
   private groupCache = new NodeCache({ stdTTL: 5 * 60, useClones: false });
 
   async createSession(sessionId: string, forceClear = false): Promise<WASocket> {
+    // Reconnect/create membatalkan status offline manual.
+    this.manualOffline.delete(sessionId);
     // Check if session already exists
     if (this.sessions.has(sessionId) && !forceClear) {
       const socket = this.sessions.get(sessionId)!;
@@ -201,6 +208,8 @@ export class SessionManager {
             isActive: false,
             lastQrAt: new Date(),
           });
+          this.lastQr.set(sessionId, { qr, at: new Date() });
+          bus.emitLink({ sessionId, qr, status: 'pairing' });
         }
 
         if (connection === 'close') {
@@ -208,7 +217,10 @@ export class SessionManager {
             (lastDisconnect?.error as Boom)?.output?.statusCode ===
             DisconnectReason.loggedOut;
 
-          const shouldReconnect = !isLoggedOut;
+          // Consume once: only the close from a manual disconnect is skipped.
+          // A subsequent real connection drop still auto-reconnects normally.
+          const wasManual = this.manualOffline.delete(sessionId);
+          const shouldReconnect = !isLoggedOut && !wasManual;
 
           log.info(
             `Connection closed for session ${sessionId}. Reconnecting: ${shouldReconnect}`
@@ -219,7 +231,15 @@ export class SessionManager {
             isActive: false,
             lastDisconnectedAt: new Date(),
           });
-
+          this.lastQr.delete(sessionId);
+          bus.emitLink({ sessionId, status: isLoggedOut ? 'logged_out' : 'disconnected' });
+          if (!wasManual) {
+            bus.emitActivity({
+              type: 'session',
+              sessionId,
+              detail: isLoggedOut ? `Session "${sessionId}" logged out` : `Session "${sessionId}" disconnected — reconnecting…`,
+            });
+          }
           if (shouldReconnect) {
             const attempts = this.reconnectAttempts.get(sessionId) || 0;
 
@@ -266,6 +286,9 @@ export class SessionManager {
             lastConnectedAt: new Date(),
             phoneNumber,
           });
+          this.lastQr.delete(sessionId);
+          bus.emitLink({ sessionId, status: 'connected' });
+          bus.emitActivity({ type: 'session', sessionId, detail: `Session "${sessionId}" connected${phoneNumber ? ` (${phoneNumber})` : ''}` });
         }
       } catch (error) {
         log.error(`Error handling connection.update for session ${sessionId}:`, error as object);
@@ -279,23 +302,72 @@ export class SessionManager {
     return this.sessions.get(sessionId);
   }
 
+  /** QR mentah terakhir untuk WS/GET /api/sessions/:id/qr. */
+  getLastQr(sessionId: string): { qr: string; at: Date } | null {
+    return this.lastQr.get(sessionId) ?? null;
+  }
+
+  /** Minta pairing code 8 digit (fallback saat kamera tidak bisa scan QR). */
+  async requestPairingCode(sessionId: string, phoneNumber: string): Promise<string> {
+    const socket = this.sessions.get(sessionId);
+    if (!socket) throw new Error(`Session "${sessionId}" tidak aktif`);
+    const digits = phoneNumber.replace(/\D/g, '');
+    if (digits.length < 8) throw new Error('Nomor HP tidak valid');
+    const api = socket as unknown as { requestPairingCode?: (phone: string) => Promise<string> };
+    if (typeof api.requestPairingCode !== 'function') {
+      throw new Error('Pairing code tidak didukung versi Baileys ini');
+    }
+    const code = await api.requestPairingCode(digits);
+    bus.emitLink({ sessionId, pairingCode: code });
+    return code;
+  }
+
+  getStats(): { inMemory: number; reconnecting: number } {
+    return { inMemory: this.sessions.size, reconnecting: this.reconnectAttempts.size };
+  }
+
   async getAllSessions(): Promise<Map<string, WASocket>> {
     return this.sessions;
   }
 
+  /**
+   * Shut a session down temporarily WITHOUT unlinking the device: WS is closed, creds stay in DB,
+   * so reconnect can resume without rescanning. (--force-clear /
+   * delete commands that need a full wipe have their own path.)
+   */
   async disconnectSession(sessionId: string): Promise<void> {
+    // Flag BEFORE closing: the 'close' event from end() sees this flag and
+    // skips the auto-reconnect loop.
+    this.manualOffline.add(sessionId);
     const socket = this.sessions.get(sessionId);
-    if (!socket) return;
-    try {
-      await socket.logout();
-    } catch (error) {
-      log.error(`Error logging out session ${sessionId} — forcing local cleanup:`, error as object);
+    if (socket) {
+      try {
+        socket.end(undefined);
+      } catch {
+        // Already closed — continue with local cleanup.
+      }
     }
     this.sessions.delete(sessionId);
     this.saveCredsMap.delete(sessionId);
     this.reconnectAttempts.delete(sessionId);
+    this.lastQr.delete(sessionId);
     await this.deleteSessionFromDB(sessionId);
     await this.triggerDisconnectCallbacks(sessionId);
+  }
+
+  /** Permanent delete: drop the connection (bounded) then remove all DB rows for that session. */
+  async deleteSession(sessionId: string): Promise<void> {
+    await this.disconnectSession(sessionId);
+    this.manualOffline.delete(sessionId);
+    await prisma.waAuthState.deleteMany({ where: { sessionId } }).catch(() => {
+      // May not exist — a pairing session doesn't necessarily have creds yet.
+    });
+    await prisma.session.deleteMany({ where: { sessionId } }).catch(() => {
+      // May not exist.
+    });
+    await prisma.waSession.deleteMany({ where: { sessionId } }).catch(() => {
+      // May not exist.
+    });
   }
 
   async disconnectAllSessions(): Promise<void> {
@@ -345,7 +417,7 @@ export class SessionManager {
 
   async loadActiveSessions(forceClear = false): Promise<void> {
     try {
-      // Cari session yang punya creds di WaAuthState (tidak peduli status isActive)
+      // Find sessions that have creds in WaAuthState (regardless of isActive status)
       const credsRows = await prisma.waAuthState.findMany({
         where: { type: 'creds', key: 'creds' },
         select: { sessionId: true },

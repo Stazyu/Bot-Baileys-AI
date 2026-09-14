@@ -63,6 +63,16 @@ export function loadConfig(): BotConfig {
   return config;
 }
 
+
+/**
+ * Patch the in-memory config (called by PATCH /api/settings).
+ * Persistence to BotConfig is done by the caller; this hot-reloads without restart.
+ */
+export function patchRuntimeConfig(patch: Partial<BotConfig>): BotConfig {
+  const current = loadConfig();
+  config = { ...current, ...patch };
+  return config;
+}
 export function getOwnerNumbers(): string[] {
   return loadConfig().ownerNumbers;
 }
@@ -86,6 +96,7 @@ export function getMaintenanceMessage(): string {
 
 export default {
   loadConfig,
+  patchRuntimeConfig,
   getOwnerNumbers,
   getPrefixes,
   isOwner,

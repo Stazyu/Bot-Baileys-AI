@@ -40,7 +40,7 @@ const mainItems: NavItem[] = [
 ]
 
 const toolsItems: NavItem[] = [
-  { title: 'Command Logs', icon: Command, route: '/command-logs' },
+  { title: 'Logs', icon: Command, route: '/command-logs' },
   { title: 'Media Downloads', icon: Download, route: '/downloads' },
 ]
 

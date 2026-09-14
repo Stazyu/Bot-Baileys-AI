@@ -63,6 +63,10 @@ export interface ToolContext {
   socket?: WASocket;
   fromJid?: string;
   sessionId?: string;
+  /** Sesi WA asli (sessionId sering diisi user JID di jalur AI — jangan dipakai untuk itu). */
+  waSessionId?: string;
+  /** User pemicu turn AI (JID). */
+  userId?: string;
   pushName?: string;
   /** The raw user message that triggered this AI turn (used for intent fallback). */
   userMessage?: string;

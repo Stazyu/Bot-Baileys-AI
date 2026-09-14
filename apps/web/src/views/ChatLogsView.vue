@@ -1,122 +1,68 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { Brain, MessageSquareText, Search, Send, ChevronLeft } from '@lucide/vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { MessageSquareText, Search, Send, ChevronLeft } from '@lucide/vue'
 import { cn } from '@/lib/utils'
+import { ApiError, api } from '@/lib/api'
+import type { ChatMessage, Conversation } from '@/lib/api-types'
+import { formatClock, initials, shortJid, timeAgo } from '@/lib/format'
+import Skeleton from '@/components/ui/skeleton/Skeleton.vue'
 import ScrollArea from '@/components/ui/scroll-area/ScrollArea.vue'
 
-// ── Types ──────────────────────────────────────────────────────────
-interface ChatMessage {
-  id: string
-  fromMe: boolean
-  from: string
-  pushName: string
-  body: string
-  timestamp: Date
-}
+const conversations = ref<Conversation[]>([])
+const loading = ref(true)
+const error = ref('')
 
-interface Conversation {
-  id: string
-  sessionId: string
-  userJid: string
-  pushName: string
-  lastMessage: string
-  lastMessageAt: Date
-  unread: number
-  aiMode: boolean
-  messages: ChatMessage[]
-}
-
-// ── Mock Data ──────────────────────────────────────────────────────
-const conversations = ref<Conversation[]>([
-  {
-    id: 'conv-1',
-    sessionId: 'Wahyu',
-    userJid: '6281234567890@s.whatsapp.net',
-    pushName: 'Budi Santoso',
-    lastMessage: 'Tolong bikin stiker dari gambar ini',
-    lastMessageAt: new Date(Date.now() - 2 * 60 * 1000),
-    unread: 0,
-    aiMode: true,
-    messages: [
-      { id: 'm1', fromMe: false, from: '6281234567890@s.whatsapp.net', pushName: 'Budi Santoso', body: 'Halo bot, bisa bantu?', timestamp: new Date(Date.now() - 10 * 60 * 1000) },
-      { id: 'm2', fromMe: true, from: 'bot', pushName: 'Bot', body: 'Halo Budi! Ada yang bisa saya bantu? 😊', timestamp: new Date(Date.now() - 9 * 60 * 1000) },
-      { id: 'm3', fromMe: false, from: '6281234567890@s.whatsapp.net', pushName: 'Budi Santoso', body: 'Tolong bikin stiker dari gambar ini', timestamp: new Date(Date.now() - 2 * 60 * 1000) },
-    ],
-  },
-  {
-    id: 'conv-2',
-    sessionId: 'Wahyu',
-    userJid: '6289876543210@s.whatsapp.net',
-    pushName: 'Siti Rahayu',
-    lastMessage: 'Cariin resep nasi goreng dong',
-    lastMessageAt: new Date(Date.now() - 15 * 60 * 1000),
-    unread: 2,
-    aiMode: true,
-    messages: [
-      { id: 'm4', fromMe: false, from: '6289876543210@s.whatsapp.net', pushName: 'Siti Rahayu', body: 'Bot, kamu bisa masak gak?', timestamp: new Date(Date.now() - 30 * 60 * 1000) },
-      { id: 'm5', fromMe: true, from: 'bot', pushName: 'Bot', body: 'Halo Siti! Saya bisa bantu cari resep kok. Mau resep apa?', timestamp: new Date(Date.now() - 29 * 60 * 1000) },
-      { id: 'm6', fromMe: false, from: '6289876543210@s.whatsapp.net', pushName: 'Siti Rahayu', body: 'Cariin resep nasi goreng dong', timestamp: new Date(Date.now() - 15 * 60 * 1000) },
-      { id: 'm7', fromMe: false, from: '6289876543210@s.whatsapp.net', pushName: 'Siti Rahayu', body: 'Yang simpel aja ya', timestamp: new Date(Date.now() - 14 * 60 * 1000) },
-    ],
-  },
-  {
-    id: 'conv-3',
-    sessionId: 'Bot Support',
-    userJid: '6283334445556@s.whatsapp.net',
-    pushName: 'Andi Pratama',
-    lastMessage: 'Download video TikTok ini https://vt.tiktok.com/...',
-    lastMessageAt: new Date(Date.now() - 45 * 60 * 1000),
-    unread: 0,
-    aiMode: false,
-    messages: [
-      { id: 'm8', fromMe: false, from: '6283334445556@s.whatsapp.net', pushName: 'Andi Pratama', body: 'Hai, bisa download TikTok gak?', timestamp: new Date(Date.now() - 50 * 60 * 1000) },
-      { id: 'm9', fromMe: true, from: 'bot', pushName: 'Bot', body: 'Bisa banget! Kirim link-nya ya 🎵', timestamp: new Date(Date.now() - 49 * 60 * 1000) },
-      { id: 'm10', fromMe: false, from: '6283334445556@s.whatsapp.net', pushName: 'Andi Pratama', body: 'Download video TikTok ini https://vt.tiktok.com/...', timestamp: new Date(Date.now() - 45 * 60 * 1000) },
-    ],
-  },
-  {
-    id: 'conv-4',
-    sessionId: 'Bot Support',
-    userJid: '6285556667778@s.whatsapp.net',
-    pushName: 'Dewi Lestari',
-    lastMessage: 'Pukul berapa sekarang di Jakarta? 😂',
-    lastMessageAt: new Date(Date.now() - 3 * 60 * 60 * 1000),
-    unread: 0,
-    aiMode: true,
-    messages: [
-      { id: 'm11', fromMe: false, from: '6285556667778@s.whatsapp.net', pushName: 'Dewi Lestari', body: 'Bot, lagi ngapain?', timestamp: new Date(Date.now() - 4 * 60 * 60 * 1000) },
-      { id: 'm12', fromMe: true, from: 'bot', pushName: 'Bot', body: 'Lagi santai nih Dewi. Ada yang bisa dibantu?', timestamp: new Date(Date.now() - 3.9 * 60 * 60 * 1000) },
-      { id: 'm13', fromMe: false, from: '6285556667778@s.whatsapp.net', pushName: 'Dewi Lestari', body: 'Pukul berapa sekarang di Jakarta? 😂', timestamp: new Date(Date.now() - 3 * 60 * 60 * 1000) },
-      { id: 'm14', fromMe: true, from: 'bot', pushName: 'Bot', body: 'Sekarang pukul 15:00 WIB, Dewi. Ngapain nanya jam? HAHAHA', timestamp: new Date(Date.now() - 2.9 * 60 * 60 * 1000) },
-    ],
-  },
-  {
-    id: 'conv-5',
-    sessionId: 'Wahyu',
-    userJid: '6284443332221@s.whatsapp.net',
-    pushName: 'Rizky Fauzan',
-    lastMessage: 'Cari gambar pemandangan di Pinterest',
-    lastMessageAt: new Date(Date.now() - 5 * 60 * 60 * 1000),
-    unread: 1,
-    aiMode: true,
-    messages: [
-      { id: 'm15', fromMe: false, from: '6284443332221@s.whatsapp.net', pushName: 'Rizky Fauzan', body: 'Bot cariin gambar pemandangan dong', timestamp: new Date(Date.now() - 6 * 60 * 60 * 1000) },
-      { id: 'm16', fromMe: true, from: 'bot', pushName: 'Bot', body: 'Oke Rizky, saya cari di Pinterest ya. Sebentar...', timestamp: new Date(Date.now() - 5.9 * 60 * 60 * 1000) },
-      { id: 'm17', fromMe: true, from: 'bot', pushName: 'Bot', body: 'Nih beberapa hasilnya: [3 gambar pemandangan]', timestamp: new Date(Date.now() - 5.8 * 60 * 60 * 1000) },
-      { id: 'm18', fromMe: false, from: '6284443332221@s.whatsapp.net', pushName: 'Rizky Fauzan', body: 'Cari gambar pemandangan di Pinterest', timestamp: new Date(Date.now() - 5 * 60 * 60 * 1000) },
-    ],
-  },
-])
-
-// ── State ──────────────────────────────────────────────────────────
 const selectedConvId = ref<string | null>(null)
 const searchQuery = ref('')
 const replyText = ref('')
 const isSending = ref(false)
+const sendError = ref('')
+
+async function load(): Promise<void> {
+  loading.value = true
+  error.value = ''
+  try {
+    const res = await api<{ items: Conversation[]; total: number }>('/api/conversations', { query: { limit: 20 } })
+    conversations.value = res.items
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.message : 'Failed to load conversations'
+  } finally {
+    loading.value = false
+  }
+}
+
+function retry(): void {
+  void load()
+}
+
+onMounted(() => void load())
 
 const selectedConv = computed(() =>
   conversations.value.find((c) => c.id === selectedConvId.value) ?? null,
 )
+const threadScroll = ref<{ $el: HTMLElement } | null>(null)
+
+function threadViewport(): HTMLElement | null {
+  const root = threadScroll.value?.$el
+  return root?.querySelector('[data-reka-scroll-area-viewport]') ?? null
+}
+
+function scrollThreadToBottom(): void {
+  const view = threadViewport()
+  if (view) view.scrollTop = view.scrollHeight
+}
+
+// Buka thread → selalu paling bawah. Pesan baru → ikut ke bawah hanya bila
+// user sudah di dekat bawah (tidak merampas posisi baca riwayat).
+watch(selectedConvId, () => {
+  void nextTick(() => scrollThreadToBottom())
+})
+watch(() => selectedConv.value?.messages.length ?? 0, () => {
+  const view = threadViewport()
+  if (!view) return
+  const nearBottom = view.scrollHeight - view.scrollTop - view.clientHeight < 120
+  if (nearBottom) void nextTick(() => scrollThreadToBottom())
+})
 
 const filteredConversations = computed(() => {
   const q = searchQuery.value.toLowerCase().trim()
@@ -129,70 +75,50 @@ const filteredConversations = computed(() => {
   )
 })
 
-const totalUnread = computed(() =>
-  conversations.value.reduce((sum, c) => sum + c.unread, 0),
-)
-
-// ── Helpers ────────────────────────────────────────────────────────
 function selectConversation(id: string) {
   selectedConvId.value = id
-  // mark as read
-  const conv = conversations.value.find((c) => c.id === id)
-  if (conv) conv.unread = 0
 }
 
-function formatTime(date: Date): string {
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffMin = Math.floor(diffMs / 60000)
-  if (diffMin < 1) return 'Baru saja'
-  if (diffMin < 60) return `${diffMin}m`
-  const diffHour = Math.floor(diffMin / 60)
-  if (diffHour < 24) return `${diffHour}j`
-  return date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
+function messageTime(msg: ChatMessage): string {
+  return formatClock(msg.timestamp ?? msg.createdAt)
 }
 
-function formatMessageTime(date: Date): string {
-  return date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
-}
-
-function initials(name: string): string {
-  return name
-    .split(' ')
-    .map((w) => w[0] ?? '')
-    .slice(0, 2)
-    .join('')
-    .toUpperCase()
-}
-
-function sendReply() {
+async function sendReply() {
   const text = replyText.value.trim()
-  if (!text || !selectedConv.value) return
+  const conv = selectedConv.value
+  if (!text || !conv || isSending.value) return
 
   isSending.value = true
-
-  // simulate sending
-  setTimeout(() => {
+  sendError.value = ''
+  try {
+    const res = await api<{ sent: boolean; id: string | null }>(`/api/sessions/${conv.sessionId}/send`, {
+      method: 'POST',
+      body: { to: conv.userJid, text },
+    })
+    const now = new Date().toISOString()
     const newMsg: ChatMessage = {
-      id: `m${Date.now()}`,
+      id: res.id ?? `local-${Date.now()}`,
       fromMe: true,
-      from: 'bot',
       pushName: 'Bot',
       body: text,
-      timestamp: new Date(),
+      timestamp: now,
+      createdAt: now,
     }
-    selectedConv.value!.messages.push(newMsg)
-    selectedConv.value!.lastMessage = text
-    selectedConv.value!.lastMessageAt = new Date()
+    conv.messages.push(newMsg)
+    conv.lastMessage = text
+    conv.lastMessageAt = now
     replyText.value = ''
+  } catch (e) {
+    sendError.value = e instanceof ApiError ? e.message : 'Failed to send reply'
+  } finally {
     isSending.value = false
-  }, 400)
+  }
 }
 
 function onReplyKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
-    sendReply()
+    void sendReply()
   }
 }
 
@@ -214,22 +140,27 @@ function autoresize(e: Event) {
           Conversations between users and the bot — view and reply.
         </p>
       </div>
-      <span
-        v-if="totalUnread > 0"
-        class="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3.5 py-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-300"
-      >
-        <span class="size-1.5 rounded-full bg-emerald-500" />
-        {{ totalUnread }} unread
-      </span>
+    </div>
+
+    <div v-if="loading" class="grid grid-cols-1 gap-4 lg:grid-cols-12">
+      <Skeleton class="min-h-[620px] rounded-[24px] lg:col-span-4" />
+      <Skeleton class="hidden min-h-[620px] rounded-[24px] lg:col-span-8 lg:block" />
+    </div>
+    <div v-else-if="error && conversations.length === 0" class="rounded-[24px] bg-card p-10 text-center shadow-soft">
+      <p class="text-base font-bold">Couldn't load conversations</p>
+      <p class="mt-1 text-sm text-muted-foreground">{{ error }}</p>
+      <button @click="retry" class="mt-5 rounded-full bg-muted px-5 py-2 text-xs font-semibold transition-design hover:text-foreground">
+        Retry
+      </button>
     </div>
 
     <!-- Chat Layout: Conversation List + Thread -->
-    <div class="grid grid-cols-1 gap-4 lg:grid-cols-12">
+    <div v-else class="grid grid-cols-1 gap-4 lg:grid-cols-12">
       <!-- LEFT: Conversation List -->
       <section
         class="flex flex-col rounded-[24px] bg-card p-3 shadow-soft lg:col-span-4 xl:col-span-4"
         :class="selectedConvId ? 'hidden lg:flex' : 'flex'"
-        style="min-height: 620px; max-height: calc(100vh - 220px);"
+        style="height: max(620px, calc(100vh - 220px));"
       >
         <div class="relative px-1 pt-1 pb-3">
           <Search class="absolute top-1/2 left-4 size-4 -translate-y-[calc(50%+6px)] text-muted-foreground" />
@@ -261,19 +192,14 @@ function autoresize(e: Event) {
               <div class="min-w-0 flex-1">
                 <div class="flex items-center justify-between gap-2">
                   <span class="truncate text-sm font-semibold">{{ conv.pushName }}</span>
-                  <span class="shrink-0 text-[11px] tabular-nums text-muted-foreground">{{ formatTime(conv.lastMessageAt) }}</span>
+                  <span class="shrink-0 text-[11px] tabular-nums text-muted-foreground">{{ timeAgo(conv.lastMessageAt) }}</span>
                 </div>
                 <div class="mt-0.5 flex items-center justify-between gap-2">
                   <span class="truncate text-xs text-muted-foreground">{{ conv.lastMessage }}</span>
-                  <span v-if="conv.unread > 0" class="flex size-5 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-[10px] font-bold text-white tabular-nums">
-                    {{ conv.unread }}
-                  </span>
                 </div>
                 <div class="mt-1.5 flex items-center gap-1.5">
-                  <span v-if="conv.aiMode" class="inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-2 py-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-300">
-                    <Brain class="size-2.5" />
-                    AI
-                  </span>
+                  <span class="font-mono text-[10px] text-muted-foreground">{{ shortJid(conv.userJid) }}</span>
+                  <span aria-hidden="true" class="text-[10px] text-muted-foreground">·</span>
                   <span class="text-[10px] text-muted-foreground">{{ conv.sessionId }}</span>
                 </div>
               </div>
@@ -284,9 +210,9 @@ function autoresize(e: Event) {
 
       <!-- RIGHT: Chat Thread -->
       <section
-        class="flex-col rounded-[24px] bg-card p-4 shadow-soft sm:p-5 lg:col-span-8 xl:col-span-8"
+        class="flex-col overflow-hidden rounded-[24px] bg-card p-4 shadow-soft sm:p-5 lg:col-span-8 xl:col-span-8"
         :class="selectedConvId ? 'flex' : 'hidden lg:flex'"
-        style="min-height: 620px; max-height: calc(100vh - 220px);"
+        style="height: max(620px, calc(100vh - 220px));"
       >
         <!-- Empty State -->
         <div v-if="!selectedConv" class="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
@@ -315,14 +241,10 @@ function autoresize(e: Event) {
               <p class="truncate text-sm font-bold">{{ selectedConv.pushName }}</p>
               <p class="truncate font-mono text-[11px] text-muted-foreground">{{ selectedConv.userJid }}</p>
             </div>
-            <span v-if="selectedConv.aiMode" class="inline-flex shrink-0 items-center gap-1 rounded-full bg-violet-500/10 px-2.5 py-1 text-[11px] font-semibold text-violet-600 dark:text-violet-300">
-              <Brain class="size-3" />
-              AI Mode
-            </span>
           </div>
 
           <!-- Messages -->
-          <ScrollArea class="min-h-0 flex-1">
+          <ScrollArea ref="threadScroll" type="always" class="min-h-0 flex-1">
             <div class="flex flex-col gap-1.5 px-1 py-2">
               <div
                 v-for="msg in selectedConv.messages"
@@ -338,7 +260,7 @@ function autoresize(e: Event) {
                 </span>
                 <div class="min-w-0">
                   <div
-                    class="px-4 py-2.5 text-sm leading-relaxed"
+                    class="px-4 py-2.5 text-sm leading-relaxed break-words [overflow-wrap:anywhere]"
                     :class="msg.fromMe
                       ? 'rounded-[20px] rounded-tr-lg bg-emerald-500 text-white'
                       : 'rounded-[20px] rounded-tl-lg bg-muted'"
@@ -346,7 +268,7 @@ function autoresize(e: Event) {
                     {{ msg.body }}
                   </div>
                   <div class="mt-1 flex items-center gap-2" :class="msg.fromMe ? 'justify-end' : 'justify-start'">
-                    <span class="text-[10px] tabular-nums text-muted-foreground">{{ formatMessageTime(msg.timestamp) }}</span>
+                    <span class="text-[10px] tabular-nums text-muted-foreground">{{ messageTime(msg) }}</span>
                   </div>
                 </div>
               </div>
@@ -373,13 +295,9 @@ function autoresize(e: Event) {
                 <Send class="size-4" :class="{ 'animate-pulse': isSending }" />
               </button>
             </div>
-            <p class="mt-2 ml-2 text-[11px] text-muted-foreground">
-              <template v-if="selectedConv.aiMode">
-                Balasan dikirim sebagai bot — user menerima pesan dari nomor WA.
-              </template>
-              <template v-else>
-                User ini tidak dalam AI mode. Balasan hanya simulasi.
-              </template>
+            <p v-if="sendError" class="mt-2 ml-2 text-[11px] font-semibold text-rose-500">{{ sendError }}</p>
+            <p v-else class="mt-2 ml-2 text-[11px] text-muted-foreground">
+              Balasan dikirim sebagai bot — user menerima pesan dari nomor WA.
             </p>
           </div>
         </template>

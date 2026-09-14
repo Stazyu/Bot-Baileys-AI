@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/sidebar'
 import Separator from '@/components/ui/separator/Separator.vue'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import ApiTokenGate from '@/components/ApiTokenGate.vue'
 </script>
 
 <template>
@@ -29,6 +30,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
           </span>
         </div>
       </header>
+    <ApiTokenGate />
 
       <ScrollArea class="flex-1 min-h-0 bg-[#f6f8f7] dark:bg-background">
         <div class="w-full space-y-6 p-4 pt-5 sm:px-8 sm:py-6">

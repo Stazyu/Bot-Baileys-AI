@@ -36,7 +36,7 @@ RUN pnpm build
 RUN pnpm prune --prod
 
 
-# ===== RUNTIME (super clean & kecil) =====
+# ===== RUNTIME (super clean & minimal) =====
 FROM node:24-bookworm-slim AS runtime
 
 WORKDIR /app
@@ -65,19 +65,23 @@ COPY --from=builder /app/prisma ./prisma
 
 ENV NODE_ENV=production
 
-# 🔥 Auto-skip the 'dev' session when loading from DB.
-# Override at runtime with -e EXCLUDE_SESSIONS="" or -e INCLUDE_SESSIONS="prod,staging"
-# ENV EXCLUDE_SESSIONS=dev
-# ENV EXCLUDE_SESSIONS=default
-ENV INCLUDE_SESSIONS=default
+# Dashboard API (Fastify, same process as the bot). Port follows $PORT (default 3001).
+EXPOSE 3001
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 
+# ─── Session autoload filter ─────────────────────────────────────────
+# Default: load ALL sessions that have credentials in the DB (dashboard lists all).
+# To restrict, set at runtime (never bake into the image):
+#   docker run -e INCLUDE_SESSIONS="prod" ...        (prod only)
+#   docker run -e EXCLUDE_SESSIONS="dev" ...         (everything except dev)
 # ─── Instagram Cookies (yt-dlp) ──────────────────────────────────────
-# Di Coolify / Docker, mount cookies.txt sebagai file mount:
-#   Host path:  /var/coolify/cookies.txt (atau path file yg kamu upload)
+# On Coolify / Docker, mount cookies.txt as a file mount:
+#   Host path:  /var/coolify/cookies.txt (or the path of your uploaded file)
 #   Container:  /app/cookies.txt
-# Lalu set env var:
+# Then set the env var:
 #   INSTAGRAM_DL_COOKIES=/app/cookies.txt
-# Atau otomatis set default path di sini:
+# Or set the default path right here:
 ENV INSTAGRAM_DL_COOKIES=/app/cookies.txt
 
 # Use tini as PID 1 for proper signal forwarding (SIGINT/SIGTERM)

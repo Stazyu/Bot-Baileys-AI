@@ -68,7 +68,7 @@ export async function usePrismaAuthState(
   sessionId: string,
   forceClear = false,
 ): Promise<{ state: AuthenticationState; saveCreds: () => Promise<void> }> {
-  // ── force-clear: hapus semua auth data ───────────────────────
+  // ── force-clear: delete all auth data ───────────────────────
   if (forceClear) {
     log.info(`[usePrismaAuthState] Force-clearing auth data for "${sessionId}"`);
     await prisma.waAuthState.deleteMany({ where: { sessionId } });

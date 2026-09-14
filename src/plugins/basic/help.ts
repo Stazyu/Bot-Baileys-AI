@@ -83,7 +83,7 @@ const helpCommand: CommandModule = {
       const categories = new Map<string, CommandEntry[]>();
 
       for (const cmd of allCommands) {
-        // Sembunyikan command khusus owner dari pengguna non-owner.
+        // Hide owner-only commands from non-owner users.
         if (cmd.config.ownerOnly && !isOwnerUser) {
           continue;
         }

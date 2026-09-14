@@ -179,7 +179,7 @@ export const execute: ToolExecuteFunction = async (args, context) => {
         name: resolvedPackName,
         publisher: resolvedAuthorName,
         packId: `sp-pinterest-${Date.now().toString(36)}`,
-        // description: `Sticker ini di buat oleh ${resolvedAuthorName} berjumlah (${batchResult.stickers.length} sticker)\n\nJangan lupa follow IG owner @wahyuhp57`,
+        // description: `This sticker was made by ${resolvedAuthorName} totaling (${batchResult.stickers.length} stickers)\n\nDon't forget to follow the owner IG @wahyuhp57`,
         cover: batchResult.stickers[0].stickerBuffer,
         stickers: batchResult.stickers.map((stickerResult, i) => ({
           data: stickerResult.stickerBuffer,

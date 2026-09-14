@@ -20,10 +20,10 @@ import { log } from '../../utils/logger.js';
 //   !stickerpack demo                → send a self-contained demo pack
 //
 // Album (collapsed media) support:
-//   - Reply ke album yang sudah dikirim + `!stickerpack add` → semua media
-//     dalam album ditambahkan sekaligus.
-//   - Caption `!stickerpack add` pada media pertama sebuah album → semua
-//     media anggota album ditambahkan sekaligus.
+//   - Reply to an already-sent album + `!stickerpack add` → all media
+//     in the album are added at once.
+//   - Caption `!stickerpack add` on the first media of an album → all
+//     member media of the album are added at once.
 // ---------------------------------------------------------------------------
 
 const MAX_STICKERS = 60; // WhatsApp hard limit enforced by the fork

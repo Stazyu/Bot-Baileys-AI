@@ -1,434 +1,115 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { Search, Command, Clock, CheckCircle2, XCircle, Terminal, type LucideIcon } from '@lucide/vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { Search, Command, Clock, CheckCircle2, XCircle, Terminal, Wrench, Star, TriangleAlert, type LucideIcon } from '@lucide/vue'
 import { cn } from '@/lib/utils'
+import { ApiError, api } from '@/lib/api'
+import type { CommandItem, CommandsPage, RuntimeLogItem, RuntimeLogLevel, RuntimeLogsResponse, ToolCallItem, ToolsPage } from '@/lib/api-types'
+import { formatClock, formatResponseTime, shortJid, timeAgo } from '@/lib/format'
+import Skeleton from '@/components/ui/skeleton/Skeleton.vue'
+import ScrollArea from '@/components/ui/scroll-area/ScrollArea.vue'
+import { usePoll } from '@/composables/usePoll'
 
-// ── Types ──────────────────────────────────────────────────────────
-interface CommandLog {
-  id: string
-  command: string
-  args: string
-  pushName: string
-  jid: string
-  session: string
-  timestamp: Date
-  status: 'success' | 'error'
-  responseTime: number // in ms
-  category: string
-  groupName?: string
-  errorMessage?: string
-}
+// ── State ──────────────────────────────────────────────────────────
+const items = ref<CommandItem[]>([])
+const summary = ref({ total: 0, success: 0, error: 0, avgLatencyMs: 0, top: [] as { command: string; count: number }[] })
+const page = ref(1)
+const pageSize = 30
+const hasMore = ref(false)
+const loading = ref(true)
+const loadingMore = ref(false)
+const error = ref('')
 
-// ── Mock Data ──────────────────────────────────────────────────────
-const logs = ref<CommandLog[]>([
-  {
-    id: 'cl-01',
-    command: '!ping',
-    args: '',
-    pushName: 'Budi Santoso',
-    jid: '6281234567890@s.whatsapp.net',
-    session: 'Wahyu',
-    timestamp: new Date(Date.now() - 1 * 60 * 1000),
-    status: 'success',
-    responseTime: 127,
-    category: 'basic',
-  },
-  {
-    id: 'cl-02',
-    command: '!sticker',
-    args: '(image attached)',
-    pushName: 'Siti Rahayu',
-    jid: '6289876543210@s.whatsapp.net',
-    session: 'Wahyu',
-    timestamp: new Date(Date.now() - 3 * 60 * 1000),
-    status: 'success',
-    responseTime: 843,
-    category: 'media',
-  },
-  {
-    id: 'cl-03',
-    command: '!tiktok',
-    args: 'https://vt.tiktok.com/ZS1234567/',
-    pushName: 'Andi Pratama',
-    jid: '6283334445556@s.whatsapp.net',
-    session: 'Bot Support',
-    timestamp: new Date(Date.now() - 5 * 60 * 1000),
-    status: 'success',
-    responseTime: 2341,
-    category: 'media',
-  },
-  {
-    id: 'cl-04',
-    command: '!ai',
-    args: 'on',
-    pushName: 'Dewi Lestari',
-    jid: '6285556667778@s.whatsapp.net',
-    session: 'Bot Support',
-    timestamp: new Date(Date.now() - 8 * 60 * 1000),
-    status: 'success',
-    responseTime: 93,
-    category: 'ai',
-  },
-  {
-    id: 'cl-05',
-    command: '!help',
-    args: '',
-    pushName: 'Rizky Fauzan',
-    jid: '6284443332221@s.whatsapp.net',
-    session: 'Wahyu',
-    timestamp: new Date(Date.now() - 10 * 60 * 1000),
-    status: 'success',
-    responseTime: 156,
-    category: 'basic',
-  },
-  {
-    id: 'cl-06',
-    command: '!instagram',
-    args: 'https://instagram.com/p/ABC123/',
-    pushName: 'Maya Indah',
-    jid: '6281112223334@s.whatsapp.net',
-    session: 'Premium Bot',
-    timestamp: new Date(Date.now() - 12 * 60 * 1000),
-    status: 'error',
-    responseTime: 5432,
-    category: 'media',
-    errorMessage: 'Invalid URL or media not found',
-  },
-  {
-    id: 'cl-07',
-    command: '!hidetag',
-    args: 'Selamat pagi semua!',
-    pushName: 'Hendra Gunawan',
-    jid: '6287778889990@s.whatsapp.net',
-    session: 'Premium Bot',
-    timestamp: new Date(Date.now() - 15 * 60 * 1000),
-    status: 'success',
-    responseTime: 210,
-    category: 'group',
-    groupName: 'Keluarga Bahagia',
-  },
-  {
-    id: 'cl-08',
-    command: '!youtube',
-    args: 'https://youtube.com/watch?v=dQw4w9WgXcQ audio',
-    pushName: 'Ratna Sari',
-    jid: '6289990001112@s.whatsapp.net',
-    session: 'Wahyu',
-    timestamp: new Date(Date.now() - 18 * 60 * 1000),
-    status: 'success',
-    responseTime: 5678,
-    category: 'media',
-  },
-  {
-    id: 'cl-09',
-    command: '!status',
-    args: '',
-    pushName: 'Dimas Ardiansyah',
-    jid: '6286665554443@s.whatsapp.net',
-    session: 'Bot Support',
-    timestamp: new Date(Date.now() - 20 * 60 * 1000),
-    status: 'success',
-    responseTime: 89,
-    category: 'basic',
-  },
-  {
-    id: 'cl-10',
-    command: '!premium',
-    args: 'add 6281234567890 30',
-    pushName: 'Wahyu',
-    jid: '6281234567890@s.whatsapp.net',
-    session: 'Wahyu',
-    timestamp: new Date(Date.now() - 25 * 60 * 1000),
-    status: 'success',
-    responseTime: 178,
-    category: 'owner',
-  },
-  {
-    id: 'cl-11',
-    command: '!pinterest',
-    args: 'pemandangan alam',
-    pushName: 'Fitri Handayani',
-    jid: '6283337778889@s.whatsapp.net',
-    session: 'Premium Bot',
-    timestamp: new Date(Date.now() - 30 * 60 * 1000),
-    status: 'success',
-    responseTime: 3120,
-    category: 'media',
-  },
-  {
-    id: 'cl-12',
-    command: '!sticker',
-    args: '(video attached)',
-    pushName: 'Agus Wijaya',
-    jid: '6282225556667@s.whatsapp.net',
-    session: 'Wahyu',
-    timestamp: new Date(Date.now() - 35 * 60 * 1000),
-    status: 'error',
-    responseTime: 4500,
-    category: 'media',
-    errorMessage: 'Video too large (>5MB)',
-  },
-  {
-    id: 'cl-13',
-    command: '!changelog',
-    args: '',
-    pushName: 'Putri Ayuningtyas',
-    jid: '6288881112223@s.whatsapp.net',
-    session: 'Bot Support',
-    timestamp: new Date(Date.now() - 40 * 60 * 1000),
-    status: 'success',
-    responseTime: 112,
-    category: 'basic',
-  },
-  {
-    id: 'cl-14',
-    command: '!setgroup',
-    args: 'close',
-    pushName: 'Budi Santoso',
-    jid: '6281234567890@s.whatsapp.net',
-    session: 'Wahyu',
-    timestamp: new Date(Date.now() - 45 * 60 * 1000),
-    status: 'success',
-    responseTime: 345,
-    category: 'group',
-    groupName: 'Tech Discussion',
-  },
-  {
-    id: 'cl-15',
-    command: '!togglebot',
-    args: 'on',
-    pushName: 'Siti Rahayu',
-    jid: '6289876543210@s.whatsapp.net',
-    session: 'Wahyu',
-    timestamp: new Date(Date.now() - 50 * 60 * 1000),
-    status: 'success',
-    responseTime: 167,
-    category: 'group',
-    groupName: 'Keluarga Bahagia',
-  },
-  {
-    id: 'cl-16',
-    command: '!speedtest',
-    args: '',
-    pushName: 'Wahyu',
-    jid: '6281234567890@s.whatsapp.net',
-    session: 'Wahyu',
-    timestamp: new Date(Date.now() - 55 * 60 * 1000),
-    status: 'success',
-    responseTime: 8923,
-    category: 'owner',
-  },
-  {
-    id: 'cl-17',
-    command: '!reportbug',
-    args: 'Sticker command not working for large videos',
-    pushName: 'Rizky Fauzan',
-    jid: '6284443332221@s.whatsapp.net',
-    session: 'Wahyu',
-    timestamp: new Date(Date.now() - 60 * 60 * 1000),
-    status: 'success',
-    responseTime: 210,
-    category: 'basic',
-  },
-  {
-    id: 'cl-18',
-    command: '!facebook',
-    args: 'https://facebook.com/watch?v=123456',
-    pushName: 'Hendra Gunawan',
-    jid: '6287778889990@s.whatsapp.net',
-    session: 'Premium Bot',
-    timestamp: new Date(Date.now() - 65 * 60 * 1000),
-    status: 'error',
-    responseTime: 6789,
-    category: 'media',
-    errorMessage: 'Video download failed - private content',
-  },
-  {
-    id: 'cl-19',
-    command: '!list',
-    args: '',
-    pushName: 'Dimas Ardiansyah',
-    jid: '6286665554443@s.whatsapp.net',
-    session: 'Bot Support',
-    timestamp: new Date(Date.now() - 70 * 60 * 1000),
-    status: 'success',
-    responseTime: 145,
-    category: 'session',
-  },
-  {
-    id: 'cl-20',
-    command: '!twitter',
-    args: 'https://twitter.com/username/status/123456789',
-    pushName: 'Putri Ayuningtyas',
-    jid: '6288881112223@s.whatsapp.net',
-    session: 'Bot Support',
-    timestamp: new Date(Date.now() - 75 * 60 * 1000),
-    status: 'success',
-    responseTime: 2890,
-    category: 'media',
-  },
-  {
-    id: 'cl-21',
-    command: '!sticker',
-    args: '(image attached)',
-    pushName: 'Dewi Lestari',
-    jid: '6285556667778@s.whatsapp.net',
-    session: 'Bot Support',
-    timestamp: new Date(Date.now() - 80 * 60 * 1000),
-    status: 'success',
-    responseTime: 920,
-    category: 'media',
-  },
-  {
-    id: 'cl-22',
-    command: '!pinterest',
-    args: 'musik relaksasi',
-    pushName: 'Fitri Handayani',
-    jid: '6283337778889@s.whatsapp.net',
-    session: 'Premium Bot',
-    timestamp: new Date(Date.now() - 90 * 60 * 1000),
-    status: 'success',
-    responseTime: 2890,
-    category: 'media',
-  },
-  {
-    id: 'cl-23',
-    command: '!help',
-    args: 'sticker',
-    pushName: 'Maya Indah',
-    jid: '6281112223334@s.whatsapp.net',
-    session: 'Premium Bot',
-    timestamp: new Date(Date.now() - 100 * 60 * 1000),
-    status: 'success',
-    responseTime: 134,
-    category: 'basic',
-  },
-  {
-    id: 'cl-24',
-    command: '!ping',
-    args: '',
-    pushName: 'Ratna Sari',
-    jid: '6289990001112@s.whatsapp.net',
-    session: 'Wahyu',
-    timestamp: new Date(Date.now() - 120 * 60 * 1000),
-    status: 'success',
-    responseTime: 118,
-    category: 'basic',
-  },
-  {
-    id: 'cl-25',
-    command: '!eval',
-    args: 'console.log("test")',
-    pushName: 'Wahyu',
-    jid: '6281234567890@s.whatsapp.net',
-    session: 'Wahyu',
-    timestamp: new Date(Date.now() - 150 * 60 * 1000),
-    status: 'success',
-    responseTime: 256,
-    category: 'owner',
-  },
-  {
-    id: 'cl-26',
-    command: '!tiktok',
-    args: 'https://vm.tiktok.com/ZS9876543/',
-    pushName: 'Andi Pratama',
-    jid: '6283334445556@s.whatsapp.net',
-    session: 'Bot Support',
-    timestamp: new Date(Date.now() - 180 * 60 * 1000),
-    status: 'error',
-    responseTime: 4321,
-    category: 'media',
-    errorMessage: 'Video unavailable or restricted',
-  },
-])
-
-// ── Stats ──────────────────────────────────────────────────────────
-const totalCommands = computed(() => logs.value.length)
-const successCount = computed(() => logs.value.filter((l) => l.status === 'success').length)
-const errorCount = computed(() => logs.value.filter((l) => l.status === 'error').length)
-const avgResponseTime = computed(() => {
-  const total = logs.value.reduce((sum, l) => sum + l.responseTime, 0)
-  return Math.round(total / logs.value.length)
-})
-
-const statCards = computed<{ label: string; value: string | number; icon: LucideIcon; change: string; tone: 'up' | 'down' | 'neutral' }[]>(() => [
-  { label: 'Total Commands', value: totalCommands.value, icon: Command, change: `${successCount.value} succeeded`, tone: 'up' },
-  { label: 'Success Rate', value: `${Math.round(successCount.value / totalCommands.value * 100)}%`, icon: CheckCircle2, change: `${errorCount.value} failed`, tone: errorCount.value > 3 ? 'down' : 'up' },
-  { label: 'Avg Response', value: `${avgResponseTime.value}ms`, icon: Clock, change: 'last 26 executions', tone: 'neutral' },
-  { label: 'Errors', value: errorCount.value, icon: XCircle, change: `${errorCount.value} need attention`, tone: 'down' },
-])
-
-// ── Search & Filter ────────────────────────────────────────────────
 const searchQuery = ref('')
-const categoryFilter = ref<string>('all')
 const statusFilter = ref<'all' | 'success' | 'error'>('all')
 
-const categoryOptions = computed(() => {
-  const count = (c: string): number => logs.value.filter((l) => c === 'all' || l.category === c).length
-  const cats = [...new Set(logs.value.map((l) => l.category))]
-  return [{ key: 'all', label: 'All', count: count('all') }, ...cats.map((c) => ({ key: c, label: categoryLabel[c] ?? c, count: count(c) }))]
+async function loadPage(reset: boolean): Promise<void> {
+  if (reset) {
+    page.value = 1
+    loading.value = true
+  } else {
+    loadingMore.value = true
+  }
+  error.value = ''
+  try {
+    const res = await api<CommandsPage>('/api/commands', {
+      query: {
+        success: statusFilter.value === 'all' ? undefined : statusFilter.value === 'success',
+        page: page.value,
+        pageSize,
+      },
+    })
+    summary.value = res.summary
+    const seen = new Set((reset ? [] : items.value).map((i) => i.id))
+    const fresh = res.items.filter((i) => !seen.has(i.id))
+    items.value = reset ? res.items : [...items.value, ...fresh]
+    hasMore.value = res.page * res.pageSize < res.total
+  } catch (e) {
+    if (reset) error.value = e instanceof ApiError ? e.message : 'Failed to load commands'
+  } finally {
+    loading.value = false
+    loadingMore.value = false
+  }
+}
+
+function loadMore(): void {
+  if (!hasMore.value || loadingMore.value) return
+  page.value += 1
+  void loadPage(false)
+}
+
+function retry(): void {
+  void loadPage(true)
+}
+
+onMounted(() => {
+  void loadPage(true)
+  void loadToolsPage(true)
+  void loadLogs()
+  usePoll(() => {
+    if (tab.value === 'logs') void loadLogs()
+  }, 3000, false)
+})
+
+let statusTimer: ReturnType<typeof setTimeout> | null = null
+watch(statusFilter, () => {
+  if (statusTimer) clearTimeout(statusTimer)
+  statusTimer = setTimeout(() => {
+    if (tab.value === 'commands') void loadPage(true)
+    else if (tab.value === 'tools') void loadToolsPage(true)
+  }, 150)
+})
+
+// ── Derived ────────────────────────────────────────────────────────
+const successRate = computed(() =>
+  summary.value.total > 0 ? Math.round((summary.value.success / summary.value.total) * 100) : 0,
+)
+
+const statCards = computed<{ label: string; value: string | number; icon: LucideIcon; change: string; tone: 'up' | 'down' | 'neutral' }[]>(() => {
+  const topCmd = summary.value.top[0]
+  return [
+    { label: 'Total Commands', value: summary.value.total, icon: Command, change: `${summary.value.success} succeeded`, tone: 'up' },
+    { label: 'Success Rate', value: `${successRate.value}%`, icon: CheckCircle2, change: `${summary.value.error} failed`, tone: summary.value.error > 3 ? 'down' : 'up' },
+    { label: 'Avg Response', value: formatResponseTime(summary.value.avgLatencyMs), icon: Clock, change: `across ${summary.value.total} executions`, tone: 'neutral' },
+    { label: 'Errors', value: summary.value.error, icon: XCircle, change: `${summary.value.error} need attention`, tone: summary.value.error > 0 ? 'down' : 'up' },
+    { label: 'Top Command', value: topCmd ? `!${topCmd.command}` : '—', icon: Star, change: topCmd ? `${topCmd.count} calls` : 'no calls yet', tone: 'neutral' },
+  ]
 })
 
 const filteredLogs = computed(() => {
   const q = searchQuery.value.toLowerCase().trim()
-  return logs.value.filter((l) => {
-    const matchQuery
-      = !q
-        || l.command.toLowerCase().includes(q)
-        || l.pushName.toLowerCase().includes(q)
-        || l.jid.toLowerCase().includes(q)
-        || l.args.toLowerCase().includes(q)
-        || l.session.toLowerCase().includes(q)
-    const matchCategory = categoryFilter.value === 'all' || l.category === categoryFilter.value
-    const matchStatus = statusFilter.value === 'all' || l.status === statusFilter.value
-    return matchQuery && matchCategory && matchStatus
-  })
+  if (!q) return items.value
+  return items.value.filter(
+    (l) =>
+      l.command.toLowerCase().includes(q) ||
+      (l.args ?? '').toLowerCase().includes(q) ||
+      (l.userId ?? '').toLowerCase().includes(q) ||
+      (l.sessionId ?? '').toLowerCase().includes(q),
+  )
 })
 
 // ── Helpers ────────────────────────────────────────────────────────
-function timeAgo(date: Date): string {
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffMin = Math.floor(diffMs / 60000)
-  if (diffMin < 1) return 'Just now'
-  if (diffMin < 60) return `${diffMin}m ago`
-  const diffHour = Math.floor(diffMin / 60)
-  if (diffHour < 24) return `${diffHour}h ago`
-  const diffDay = Math.floor(diffHour / 24)
-  return `${diffDay}d ago`
-}
-
-function formatTime(date: Date): string {
-  return date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
-}
-
-function formatResponseTime(ms: number): string {
-  if (ms < 1000) return `${ms}ms`
-  return `${(ms / 1000).toFixed(1)}s`
-}
-
-const categoryLabel: Record<string, string> = {
-  basic: 'Basic',
-  media: 'Media',
-  group: 'Group',
-  owner: 'Owner',
-  ai: 'AI',
-  session: 'Session',
-}
-
-const categoryPill = (cat: string): string => {
-  const map: Record<string, string> = {
-    basic: 'bg-muted text-muted-foreground',
-    media: 'bg-sky-500/10 text-sky-600 dark:text-sky-300',
-    group: 'bg-amber-500/10 text-amber-600 dark:text-amber-300',
-    owner: 'bg-violet-500/10 text-violet-600 dark:text-violet-300',
-    ai: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300',
-    session: 'bg-slate-500/10 text-slate-500 dark:text-slate-300',
-  }
-  return map[cat] ?? 'bg-muted text-muted-foreground'
-}
-
-const responseTimeColor = (ms: number): string => {
+const responseTimeColor = (ms: number | null): string => {
+  if (ms === null) return 'text-muted-foreground'
   if (ms < 200) return 'text-emerald-500'
   if (ms < 2000) return 'text-foreground'
   if (ms < 5000) return 'text-amber-500'
@@ -437,34 +118,201 @@ const responseTimeColor = (ms: number): string => {
 
 const clearFilters = (): void => {
   searchQuery.value = ''
-  categoryFilter.value = 'all'
   statusFilter.value = 'all'
+  levelFilter.value = 'all'
 }
+// ── Tool calls tab (sumber terpisah — statistik tidak dicampur) ─────
+const tabs = [
+  { key: 'commands', label: 'Commands' },
+  { key: 'tools', label: 'Tool calls' },
+  { key: 'logs', label: 'Logs' },
+] as const
+const tab = ref<'commands' | 'tools' | 'logs'>('commands')
+
+const toolItems = ref<ToolCallItem[]>([])
+const toolSummary = ref({ total: 0, success: 0, error: 0, avgLatencyMs: 0, top: [] as { tool: string; count: number }[] })
+const toolPage = ref(1)
+const toolHasMore = ref(false)
+const toolLoading = ref(false)
+const toolLoadingMore = ref(false)
+const toolError = ref('')
+const toolsLoaded = ref(false)
+
+async function loadToolsPage(reset: boolean): Promise<void> {
+  if (reset) {
+    toolPage.value = 1
+    toolLoading.value = true
+  } else {
+    toolLoadingMore.value = true
+  }
+  toolError.value = ''
+  try {
+    const res = await api<ToolsPage>('/api/tools', {
+      query: {
+        success: statusFilter.value === 'all' ? undefined : statusFilter.value === 'success',
+        page: toolPage.value,
+        pageSize,
+      },
+    })
+    toolSummary.value = res.summary
+    const seen = new Set((reset ? [] : toolItems.value).map((i) => i.id))
+    const fresh = res.items.filter((i) => !seen.has(i.id))
+    toolItems.value = reset ? res.items : [...toolItems.value, ...fresh]
+    toolHasMore.value = res.page * res.pageSize < res.total
+    toolsLoaded.value = true
+  } catch (e) {
+    if (reset) toolError.value = e instanceof ApiError ? e.message : 'Failed to load tool calls'
+  } finally {
+    toolLoading.value = false
+    toolLoadingMore.value = false
+  }
+}
+
+function loadToolsMore(): void {
+  if (!toolHasMore.value || toolLoadingMore.value) return
+  toolPage.value += 1
+  void loadToolsPage(false)
+}
+
+function retryTools(): void {
+  void loadToolsPage(true)
+}
+
+const toolSuccessRate = computed(() =>
+  toolSummary.value.total > 0 ? Math.round((toolSummary.value.success / toolSummary.value.total) * 100) : 0,
+)
+
+const toolStatCards = computed<{ label: string; value: string | number; icon: LucideIcon; change: string; tone: 'up' | 'down' | 'neutral' }[]>(() => {
+  const top = toolSummary.value.top[0]
+  return [
+    { label: 'Total Tool Calls', value: toolSummary.value.total, icon: Wrench, change: `${toolSummary.value.success} succeeded`, tone: 'up' },
+    { label: 'Success Rate', value: `${toolSuccessRate.value}%`, icon: CheckCircle2, change: `${toolSummary.value.error} failed`, tone: toolSummary.value.error > 3 ? 'down' : 'up' },
+    { label: 'Avg Response', value: formatResponseTime(toolSummary.value.avgLatencyMs), icon: Clock, change: `across ${toolSummary.value.total} executions`, tone: 'neutral' },
+    { label: 'Errors', value: toolSummary.value.error, icon: XCircle, change: `${toolSummary.value.error} need attention`, tone: toolSummary.value.error > 0 ? 'down' : 'up' },
+    { label: 'Top Tool', value: top?.tool ?? '—', icon: Terminal, change: top ? `${top.count} calls` : 'no calls yet', tone: 'neutral' },
+  ]
+})
+const visibleStatCards = computed(() => (tab.value === 'commands' ? statCards.value : tab.value === 'tools' ? toolStatCards.value : logsStatCards.value))
+
+const filteredTools = computed(() => {
+  const q = searchQuery.value.toLowerCase().trim()
+  if (!q) return toolItems.value
+  return toolItems.value.filter(
+    (l) =>
+      l.tool.toLowerCase().includes(q) ||
+      (l.args ?? '').toLowerCase().includes(q) ||
+      (l.userId ?? '').toLowerCase().includes(q) ||
+      (l.sessionId ?? '').toLowerCase().includes(q),
+  )
+})
+
+// ── Logs tab (PrintLog versi web — 500 baris runtime terakhir, live tail) ──
+const logLevels = ['all', 'debug', 'info', 'warn', 'error'] as const
+const levelFilter = ref<(typeof logLevels)[number]>('all')
+const logItems = ref<RuntimeLogItem[]>([])
+const logLoading = ref(false)
+const logError = ref('')
+const logsLoaded = ref(false)
+const logPanel = ref<{ $el: HTMLElement } | null>(null)
+
+function logViewport(): HTMLElement | null {
+  return logPanel.value?.$el.querySelector('[data-reka-scroll-area-viewport]') ?? null
+}
+
+async function loadLogs(): Promise<void> {
+  if (!logsLoaded.value) logLoading.value = true
+  logError.value = ''
+  try {
+    const res = await api<RuntimeLogsResponse>('/api/logs', {
+      query: { level: levelFilter.value === 'all' ? undefined : levelFilter.value, limit: 200 },
+    })
+    logItems.value = res.items
+    logsLoaded.value = true
+    void nextTick(() => {
+      const el = logViewport()
+      if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 120) el.scrollTop = el.scrollHeight
+    })
+  } catch (e) {
+    if (!logsLoaded.value) logError.value = e instanceof ApiError ? e.message : 'Failed to load logs'
+  } finally {
+    logLoading.value = false
+  }
+}
+
+function retryLogs(): void {
+  logsLoaded.value = false
+  void loadLogs()
+}
+
+const levelColor = (level: RuntimeLogLevel): string => {
+  if (level === 'error') return 'text-rose-400'
+  if (level === 'warn') return 'text-amber-400'
+  if (level === 'debug') return 'text-violet-400'
+  return 'text-emerald-400'
+}
+
+const filteredLogItems = computed(() => {
+  const q = searchQuery.value.toLowerCase().trim()
+  if (!q) return logItems.value
+  return logItems.value.filter((l) => l.msg.toLowerCase().includes(q))
+})
+
+const logsStatCards = computed<{ label: string; value: string | number; icon: LucideIcon; change: string; tone: 'up' | 'down' | 'neutral' }[]>(() => {
+  const errors = logItems.value.filter((l) => l.level === 'error').length
+  const warns = logItems.value.filter((l) => l.level === 'warn').length
+  return [
+    { label: 'Lines Shown', value: logItems.value.length, icon: Terminal, change: 'last 200 · live tail', tone: 'up' },
+    { label: 'Errors', value: errors, icon: XCircle, change: `${errors} need attention`, tone: errors > 0 ? 'down' : 'up' },
+    { label: 'Warnings', value: warns, icon: TriangleAlert, change: `${warns} warnings`, tone: warns > 0 ? 'down' : 'up' },
+  ]
+})
+
+watch(tab, (t) => {
+  if (t === 'tools' && !toolsLoaded.value && !toolLoading.value) void loadToolsPage(true)
+  if (t === 'logs') void loadLogs()
+})
 </script>
 
 <template>
   <div class="space-y-6">
     <!-- Header -->
-    <div>
-      <p class="text-eyebrow text-muted-foreground">Terminal</p>
-      <h2 class="mt-1 text-2xl font-bold tracking-tight">Command Logs</h2>
-      <p class="mt-1 text-sm text-muted-foreground">
-        {{ successCount }} of {{ totalCommands }} commands succeeded · avg {{ avgResponseTime }}ms.
-      </p>
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <p class="text-eyebrow text-muted-foreground">Terminal</p>
+        <h2 class="mt-1 text-2xl font-bold tracking-tight">Logs</h2>
+        <p class="mt-1 text-sm text-muted-foreground">
+          <template v-if="tab === 'commands'">{{ summary.success }} of {{ summary.total }} commands succeeded · avg {{ formatResponseTime(summary.avgLatencyMs) }}.</template>
+          <template v-else-if="tab === 'tools'">{{ toolSummary.success }} of {{ toolSummary.total }} tool calls succeeded · avg {{ formatResponseTime(toolSummary.avgLatencyMs) }}.</template>
+          <template v-else>Live tail · {{ logItems.length }} lines · refreshes every 3s.</template>
+        </p>
+      </div>
+      <div class="flex rounded-full bg-card p-1 text-xs font-semibold shadow-soft">
+        <button
+          v-for="t in tabs"
+          :key="t.key"
+          :aria-pressed="tab === t.key"
+          @click="tab = t.key"
+          :class="cn(
+            'rounded-full px-4 py-2 transition-design',
+            tab === t.key ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground',
+          )"
+        >
+          {{ t.label }}
+        </button>
+      </div>
     </div>
 
     <!-- Stats -->
-    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
       <article
-        v-for="(stat, i) in statCards"
+        v-for="stat in visibleStatCards"
         :key="stat.label"
-        :style="{ animationDelay: `${i * 70}ms` }"
-        class="animate-fade-up card-lift group rounded-[24px] bg-card p-5 shadow-soft hover:-translate-y-1 hover:shadow-lift"
+        class="card-lift group rounded-[24px] bg-card p-5 shadow-soft hover:-translate-y-1 hover:shadow-lift"
       >
         <div class="flex items-start justify-between gap-3">
-          <div>
+          <div class="min-w-0 flex-1">
             <p class="text-eyebrow text-muted-foreground">{{ stat.label }}</p>
-            <p class="mt-1.5 text-[32px] leading-none font-bold tracking-tight text-foreground">{{ stat.value }}</p>
+            <p :title="String(stat.value)" class="mt-1.5 truncate text-[32px] leading-none font-bold tracking-tight text-foreground">{{ stat.value }}</p>
           </div>
           <span class="flex size-11 items-center justify-center rounded-full bg-primary/[0.07] text-primary transition-design group-hover:scale-105">
             <component :is="stat.icon" class="size-5" />
@@ -473,7 +321,7 @@ const clearFilters = (): void => {
         <div class="mt-3">
           <span
             :class="cn(
-              'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold',
+              'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold',
               stat.tone === 'up' && 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300',
               stat.tone === 'down' && 'bg-rose-500/10 text-rose-600 dark:text-rose-300',
               stat.tone === 'neutral' && 'bg-muted text-muted-foreground',
@@ -491,45 +339,47 @@ const clearFilters = (): void => {
         <Search class="absolute top-1/2 left-4 size-4 -translate-y-1/2 text-muted-foreground" />
         <input
           v-model="searchQuery"
-          type="search"
-          placeholder="Search command, user, args…"
+          :placeholder="tab === 'commands' ? 'Search command, args, user…' : tab === 'tools' ? 'Search tool, args, user…' : 'Search log text…'"
           class="w-full rounded-full bg-card py-2.5 pr-4 pl-11 text-sm shadow-soft outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-emerald-500/40"
         />
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <button
-          v-for="c in categoryOptions"
-          :key="c.key"
-          :aria-pressed="categoryFilter === c.key"
-          @click="categoryFilter = c.key"
+          v-for="s in (['all', 'success', 'error'] as const)"
+          :key="s"
+          :aria-pressed="statusFilter === s"
+          @click="statusFilter = s"
           :class="cn(
             'inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold capitalize transition-design',
-            categoryFilter === c.key
+            statusFilter === s
               ? 'bg-foreground text-background'
               : 'bg-card text-muted-foreground shadow-soft hover:text-foreground',
           )"
         >
-          {{ c.label }}
-          <span :class="cn('tabular-nums', categoryFilter === c.key ? 'opacity-70' : 'text-muted-foreground/70')">{{ c.count }}</span>
-        </button>
-        <button
-          :aria-pressed="statusFilter === 'error'"
-          @click="statusFilter = statusFilter === 'error' ? 'all' : 'error'"
-          :class="cn(
-            'inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold transition-design',
-            statusFilter === 'error'
-              ? 'bg-rose-500 text-white'
-              : 'bg-card text-muted-foreground shadow-soft hover:text-foreground',
-          )"
-        >
-          <span class="size-1.5 rounded-full bg-current" />
-          Errors only
+          <span class="size-1.5 rounded-full" :class="s === 'success' ? 'bg-emerald-500' : s === 'error' ? 'bg-rose-500' : 'bg-muted-foreground'" />
+          {{ s }}
         </button>
       </div>
     </div>
+    <div v-if="tab === 'logs'" class="flex flex-wrap items-center gap-2">
+      <button
+        v-for="l in logLevels"
+        :key="l"
+        :aria-pressed="levelFilter === l"
+        @click="levelFilter = l; void loadLogs()"
+        :class="cn(
+          'inline-flex items-center gap-1.5 rounded-full px-4 py-2 font-mono text-xs font-semibold capitalize transition-design',
+          levelFilter === l
+            ? 'bg-foreground text-background'
+            : 'bg-card text-muted-foreground shadow-soft hover:text-foreground',
+        )"
+      >
+        {{ l }}
+      </button>
+    </div>
 
     <!-- Execution feed -->
-    <section class="rounded-[24px] bg-card px-3 py-6 shadow-soft sm:px-4">
+    <section v-show="tab === 'commands'" class="min-h-[300px] rounded-[24px] bg-card px-3 py-6 shadow-soft sm:px-4">
       <header class="flex items-center justify-between px-3 pb-3 sm:px-4">
         <h3 class="flex items-center gap-2 text-xl font-bold tracking-tight">
           <Terminal class="size-5 text-muted-foreground" />
@@ -537,7 +387,17 @@ const clearFilters = (): void => {
         </h3>
         <span class="text-xs font-semibold text-muted-foreground">{{ filteredLogs.length }} entries</span>
       </header>
-      <ul v-if="filteredLogs.length" class="space-y-1">
+      <div v-if="loading && items.length === 0" class="space-y-2 px-3 sm:px-4">
+        <Skeleton v-for="i in 6" :key="i" class="h-[64px] w-full rounded-2xl" />
+      </div>
+      <div v-else-if="error && items.length === 0" class="flex flex-col items-center px-6 py-14 text-center">
+        <p class="mt-4 text-base font-bold">Couldn't load executions</p>
+        <p class="mt-1 max-w-xs text-sm text-muted-foreground">{{ error }}</p>
+        <button @click="retry" class="mt-5 rounded-full bg-muted px-5 py-2 text-xs font-semibold transition-design hover:text-foreground">
+          Retry
+        </button>
+      </div>
+      <ul v-else-if="filteredLogs.length" :class="loading && 'opacity-60'" class="space-y-1 transition-opacity duration-150">
         <li
           v-for="log in filteredLogs"
           :key="log.id"
@@ -545,38 +405,31 @@ const clearFilters = (): void => {
         >
           <span
             class="mt-1.5 size-2 shrink-0 rounded-full"
-            :class="log.status === 'success' ? 'bg-emerald-500' : 'bg-rose-500'"
+            :class="log.success ? 'bg-emerald-500' : 'bg-rose-500'"
           />
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
               <code
                 class="rounded-full px-2.5 py-0.5 font-mono text-xs font-bold"
-                :class="log.status === 'success'
+                :class="log.success
                   ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
                   : 'bg-rose-500/10 text-rose-600 dark:text-rose-300'"
               >
-                {{ log.command }}
+                !{{ log.command }}
               </code>
               <span v-if="log.args" class="truncate font-mono text-xs text-muted-foreground">{{ log.args }}</span>
-              <span :class="cn('rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize', categoryPill(log.category))">
-                {{ categoryLabel[log.category] ?? log.category }}
-              </span>
             </div>
             <p class="mt-1 truncate text-xs text-muted-foreground">
-              <span class="font-semibold text-foreground/70">{{ log.pushName }}</span>
+              <span class="font-mono font-semibold text-foreground/70">{{ shortJid(log.userId) }}</span>
               <span aria-hidden="true"> · </span>
-              <span>{{ log.session }}</span>
-              <span v-if="log.groupName" aria-hidden="true"> · {{ log.groupName }}</span>
-            </p>
-            <p v-if="log.errorMessage" class="mt-0.5 truncate text-xs text-rose-500/90">
-              {{ log.errorMessage }}
+              <span>{{ log.sessionId ?? '—' }}</span>
             </p>
           </div>
           <div class="hidden shrink-0 text-right sm:block">
-            <p class="font-mono text-xs font-bold tabular-nums" :class="responseTimeColor(log.responseTime)">
-              {{ formatResponseTime(log.responseTime) }}
+            <p class="font-mono text-xs font-bold tabular-nums" :class="responseTimeColor(log.latencyMs)">
+              {{ formatResponseTime(log.latencyMs) }}
             </p>
-            <p class="mt-0.5 text-[11px] tabular-nums text-muted-foreground">{{ timeAgo(log.timestamp) }} · {{ formatTime(log.timestamp) }}</p>
+            <p class="mt-0.5 text-[11px] tabular-nums text-muted-foreground">{{ timeAgo(log.createdAt) }} · {{ formatClock(log.createdAt) }}</p>
           </div>
         </li>
       </ul>
@@ -590,6 +443,127 @@ const clearFilters = (): void => {
           Clear filters
         </button>
       </div>
+      <div v-if="hasMore && filteredLogs.length" class="px-4 pt-3 text-center">
+        <button
+          @click="loadMore"
+          :disabled="loadingMore"
+          class="rounded-full bg-muted px-5 py-2 text-xs font-semibold transition-design hover:text-foreground disabled:opacity-50"
+        >
+          {{ loadingMore ? 'Loading…' : 'Load more' }}
+        </button>
+      </div>
+    </section>
+    <!-- Tool calls feed (sumber terpisah — statistik tidak dicampur) -->
+    <section v-show="tab === 'tools'" class="min-h-[300px] rounded-[24px] bg-card px-3 py-6 shadow-soft sm:px-4">
+      <header class="flex items-center justify-between px-3 pb-3 sm:px-4">
+        <h3 class="flex items-center gap-2 text-xl font-bold tracking-tight">
+          <Wrench class="size-5 text-muted-foreground" />
+          Tool Calls
+        </h3>
+        <span class="text-xs font-semibold text-muted-foreground">{{ filteredTools.length }} entries</span>
+      </header>
+      <div v-if="toolLoading && toolItems.length === 0" class="space-y-2 px-3 sm:px-4">
+        <Skeleton v-for="i in 6" :key="i" class="h-[64px] w-full rounded-2xl" />
+      </div>
+      <div v-else-if="toolError && toolItems.length === 0" class="flex flex-col items-center px-6 py-14 text-center">
+        <p class="mt-4 text-base font-bold">Couldn't load tool calls</p>
+        <p class="mt-1 max-w-xs text-sm text-muted-foreground">{{ toolError }}</p>
+        <button @click="retryTools" class="mt-5 rounded-full bg-muted px-5 py-2 text-xs font-semibold transition-design hover:text-foreground">
+          Retry
+        </button>
+      </div>
+      <ul v-else-if="filteredTools.length" :class="toolLoading && 'opacity-60'" class="space-y-1 transition-opacity duration-150">
+        <li
+          v-for="call in filteredTools"
+          :key="call.id"
+          class="flex items-start gap-3.5 rounded-2xl px-3 py-3 sm:px-4"
+        >
+          <span
+            class="mt-1.5 size-2 shrink-0 rounded-full"
+            :class="call.success ? 'bg-violet-500' : 'bg-rose-500'"
+          />
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <code
+                class="rounded-full px-2.5 py-0.5 font-mono text-xs font-bold"
+                :class="call.success
+                  ? 'bg-violet-500/10 text-violet-600 dark:text-violet-300'
+                  : 'bg-rose-500/10 text-rose-600 dark:text-rose-300'"
+              >
+                {{ call.tool }}
+              </code>
+              <span v-if="call.cached" class="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">cached</span>
+              <span v-if="call.args" class="truncate font-mono text-xs text-muted-foreground">{{ call.args }}</span>
+            </div>
+            <p class="mt-1 truncate text-xs text-muted-foreground">
+              <span class="font-mono font-semibold text-foreground/70">{{ shortJid(call.userId) }}</span>
+              <span aria-hidden="true"> · </span>
+              <span>{{ call.sessionId ?? '—' }}</span>
+            </p>
+          </div>
+          <div class="hidden shrink-0 text-right sm:block">
+            <p class="font-mono text-xs font-bold tabular-nums" :class="responseTimeColor(call.latencyMs)">
+              {{ formatResponseTime(call.latencyMs) }}
+            </p>
+            <p class="mt-0.5 text-[11px] tabular-nums text-muted-foreground">{{ timeAgo(call.createdAt) }} · {{ formatClock(call.createdAt) }}</p>
+          </div>
+        </li>
+      </ul>
+      <div v-else class="flex flex-col items-center px-6 py-14 text-center">
+        <span class="flex size-14 items-center justify-center rounded-full bg-muted">
+          <Wrench class="size-6 text-muted-foreground" />
+        </span>
+        <p class="mt-4 text-base font-bold">No tool calls yet</p>
+        <p class="mt-1 max-w-xs text-sm text-muted-foreground">They appear here when AI uses tools. Try a different search term or filter.</p>
+        <button @click="clearFilters" class="mt-5 rounded-full bg-muted px-5 py-2 text-xs font-semibold transition-design hover:text-foreground">
+          Clear filters
+        </button>
+      </div>
+      <div v-if="toolHasMore && filteredTools.length" class="px-4 pt-3 text-center">
+        <button
+          @click="loadToolsMore"
+          :disabled="toolLoadingMore"
+          class="rounded-full bg-muted px-5 py-2 text-xs font-semibold transition-design hover:text-foreground disabled:opacity-50"
+        >
+          {{ toolLoadingMore ? 'Loading…' : 'Load more' }}
+        </button>
+      </div>
+    </section>
+    <!-- Runtime logs (PrintLog versi web — live tail) -->
+    <section v-show="tab === 'logs'" class="overflow-hidden rounded-[24px] bg-[#0b1210] text-zinc-200 shadow-soft">
+      <header class="flex items-center justify-between px-5 pt-4 pb-3">
+        <h3 class="flex items-center gap-2 text-base font-bold tracking-tight">
+          <Terminal class="size-4 text-emerald-400" />
+          Runtime Log
+        </h3>
+        <span class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-400">
+          LIVE · {{ filteredLogItems.length }} lines
+        </span>
+      </header>
+      <ScrollArea ref="logPanel" class="h-[420px]">
+      <div class="px-5 pb-5 font-mono text-xs leading-relaxed">
+        <div v-if="logLoading && !logsLoaded" class="space-y-2 pt-2">
+          <div v-for="i in 8" :key="i" class="h-4 animate-pulse rounded bg-white/10" />
+        </div>
+        <div v-else-if="logError && !logsLoaded" class="flex flex-col items-center py-14 text-center">
+          <p class="text-sm font-bold text-zinc-100">Couldn't load logs</p>
+          <p class="mt-1 max-w-xs text-xs text-zinc-400">{{ logError }}</p>
+          <button @click="retryLogs" class="mt-5 rounded-full bg-white/10 px-5 py-2 text-xs font-semibold transition-design hover:bg-white/20">
+            Retry
+          </button>
+        </div>
+        <div v-else-if="!filteredLogItems.length" class="py-14 text-center text-xs text-zinc-500">
+          No log lines yet — buffer terisi saat bot mencetak log.
+        </div>
+        <div v-else>
+          <div v-for="(l, i) in filteredLogItems" :key="i" class="flex gap-3 py-px">
+            <span class="shrink-0 tabular-nums text-zinc-500">{{ formatClock(l.t) }}</span>
+            <span class="w-12 shrink-0 font-bold uppercase" :class="levelColor(l.level)">{{ l.level }}</span>
+            <span class="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">{{ l.msg }}</span>
+          </div>
+        </div>
+      </div>
+      </ScrollArea>
     </section>
   </div>
 </template>
