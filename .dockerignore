@@ -34,3 +34,13 @@ sessions/*
 
 # Documentation
 README.md
+
+# Tidak dibutuhkan image backend (build hanya pakai src/, prisma/, package.json)
+apps/web
+temp
+tests
+plans
+.roo
+.agents
+.vscode
+*.log
