@@ -1,22 +1,25 @@
-# Bot-Baileys-AI — orkestrasi lokal / VPS tunggal (DB: MongoDB cloud).
+# Bot-Baileys-AI — compose untuk Coolify + VPS (DB: MongoDB cloud).
 #
-#   docker compose up -d --build
-#   Web → http://localhost:8080 | API → http://localhost:3001
+# Coolify (cara pakai):
+#   1. Deploy resource ini sebagai "Docker Compose".
+#   2. JANGAN bind host-port manual — Coolify yang routing via domain per
+#      service (tambah domain untuk `web` dan `bot` di dashboard Coolify).
+#      Itu sebabnya file ini pakai `expose`, bukan `ports`.
+#   3. Set env di dashboard Coolify:
+#        DATABASE_URL = mongodb+srv://... (wajib — dari DB cloud-mu)
+#        VITE_API_URL = https://<domain-api-bot> (wajib rebuild `web`)
+#        CORS_ORIGIN  = https://<domain-web> (wajib — kalau tidak, browser
+#                       di-block CORS)
+#        + secret lain: DASHBOARD_API_TOKEN, AI keys, dsb.
+#   4. Redeploy. Error "port is already allocated" kemarin = ada container
+#      lama yang masih pegang 3001 — hapus deployment/container lama itu
+#      dulu, atau memang bentrok dengan app lain di host yang sama.
 #
-# Syarat: `DATABASE_URL` cloud (Atlas dsb, `mongodb+srv://...`) wajib ada di
-# `.env` — service `bot` TIDAK meng-override-nya lagi. Tanpa itu bot exit
-# dengan pesan jelas (cek di src/index.ts).
+# Lokal (non-Coolify): uncomment blok `ports:` di bawah bila butuh akses
+# langsung http://localhost:8080 / :3001, lalu `docker compose up -d --build`.
 #
-# Catatan:
-# - VITE_API_URL di-embed saat `vite build`. Akses dari mesin lain
-#   (mis. http://192.168.1.10:3001) → rebuild dengan arg baru, mis:
-#     VITE_API_URL=http://192.168.1.10:3001 docker compose up -d --build web
-#   atau sekalian set di `build.args` bawah.
-# - Secret lain (DASHBOARD_API_TOKEN, AI keys) juga dari `.env`;
-#   nilai `environment:` di bawah menang atas `.env`.
-# - cookies.txt Instagram/yt-dlp: uncomment volume di service `bot`
-#   setelah file ada di host (./cookies.txt).
-
+# VITE_API_URL di-embed saat `vite build` — ganti domain = rebuild `web`:
+#   VITE_API_URL=https://api.contoh.com docker compose up -d --build web
 name: bot-baileys-ai
 
 services:
@@ -25,8 +28,11 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
-    ports:
-      - "3001:3001"
+    expose:
+      - "3001"
+    # Lokal saja (Coolify: biarkan commented):
+    # ports:
+    #   - "3001:3001"
     env_file:
       - path: .env
         required: false
@@ -34,7 +40,7 @@ services:
       HOST: 0.0.0.0
       PORT: 3001
       NODE_ENV: production
-      CORS_ORIGIN: http://localhost:8080
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
     # volumes:
     #   - ./cookies.txt:/app/cookies.txt:ro
 
@@ -43,10 +49,13 @@ services:
       context: ./apps/web
       dockerfile: Dockerfile
       args:
-        VITE_API_URL: http://localhost:3001
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
     restart: unless-stopped
-    ports:
-      - "8080:80"
+    expose:
+      - "80"
+    # Lokal saja (Coolify: biarkan commented):
+    # ports:
+    #   - "8080:80"
     depends_on:
       - bot
     healthcheck:
