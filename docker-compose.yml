@@ -1,0 +1,57 @@
+# Bot-Baileys-AI — orkestrasi lokal / VPS tunggal (DB: MongoDB cloud).
+#
+#   docker compose up -d --build
+#   Web → http://localhost:8080 | API → http://localhost:3001
+#
+# Syarat: `DATABASE_URL` cloud (Atlas dsb, `mongodb+srv://...`) wajib ada di
+# `.env` — service `bot` TIDAK meng-override-nya lagi. Tanpa itu bot exit
+# dengan pesan jelas (cek di src/index.ts).
+#
+# Catatan:
+# - VITE_API_URL di-embed saat `vite build`. Akses dari mesin lain
+#   (mis. http://192.168.1.10:3001) → rebuild dengan arg baru, mis:
+#     VITE_API_URL=http://192.168.1.10:3001 docker compose up -d --build web
+#   atau sekalian set di `build.args` bawah.
+# - Secret lain (DASHBOARD_API_TOKEN, AI keys) juga dari `.env`;
+#   nilai `environment:` di bawah menang atas `.env`.
+# - cookies.txt Instagram/yt-dlp: uncomment volume di service `bot`
+#   setelah file ada di host (./cookies.txt).
+
+name: bot-baileys-ai
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3001
+      NODE_ENV: production
+      CORS_ORIGIN: http://localhost:8080
+    # volumes:
+    #   - ./cookies.txt:/app/cookies.txt:ro
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: http://localhost:3001
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - bot
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
