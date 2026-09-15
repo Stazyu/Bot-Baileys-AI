@@ -39,8 +39,13 @@ function paint(value: string | number, code: string): string {
   return `${code}${value}${RESET}`;
 }
 
-/** Persist the request to HttpLog + one colored terminal line (bypasses LOG_LEVEL). */
+/** Persist the request to HttpLog + one colored terminal line (dev only — bypasses LOG_LEVEL). */
 export async function registerHttpLogHooks(app: FastifyInstance): Promise<void> {
+  // Read at registration time (after dotenv.config()), not at module scope:
+  // production never prints request traces. That covers both surfaces — the
+  // terminal AND the web viewer ring buffer, which taps stdout.
+  const traceEnabled = process.env.NODE_ENV !== 'production';
+
   app.addHook('onRequest', async (req) => {
     startTimes.set(req, Date.now());
   });
@@ -49,7 +54,9 @@ export async function registerHttpLogHooks(app: FastifyInstance): Promise<void> 
     if (!shouldSkip(req)) {
       const startedAt = startTimes.get(req);
       const durationMs = startedAt === undefined ? null : Date.now() - startedAt;
-      console.log(`${paint(req.method, METHOD_COLORS[req.method] ?? '')} ${req.url.slice(0, 120)} ${paint(reply.statusCode, statusColor(reply.statusCode))} ${durationMs === null ? '-' : `${durationMs}ms`}`);
+      if (traceEnabled) {
+        console.log(`${paint(req.method, METHOD_COLORS[req.method] ?? '')} ${req.url.slice(0, 120)} ${paint(reply.statusCode, statusColor(reply.statusCode))} ${durationMs === null ? '-' : `${durationMs}ms`}`);
+      }
       const entry = {
         method: req.method,
         path: req.url.slice(0, 500),

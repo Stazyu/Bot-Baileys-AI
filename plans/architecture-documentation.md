@@ -1004,7 +1004,7 @@ services:
 | `INCLUDE_SESSIONS` | No | Session IDs to load (comma-separated) |
 | `EXCLUDE_SESSIONS` | No | Session IDs to skip (comma-separated) |
 | `LOG_LEVEL` | No | Log level: `silent`, `error`, `warn`, `info`, `debug` |
-| `NODE_ENV` | No | `development` or `production` |
+| `NODE_ENV` | No | `development` or `production`. Di `production`: trace HTTP satu-baris tidak dicetak — bersih di terminal maupun viewer web (`GET /api/logs`); baris `HttpLog` tetap ditulis untuk access log |
 | `MAINTENANCE` | No | Enable maintenance mode (`true`) |
 | `MAINTENANCE_MESSAGE` | No | Custom maintenance message |
 

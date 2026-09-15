@@ -22,7 +22,10 @@ export async function buildServer(): Promise<FastifyInstance> {
   const level = process.env.LOG_LEVEL?.trim() ?? '';
   const logLevel = VALID_LOG_LEVELS.includes(level) ? level : 'warn';
   const isProd = process.env.NODE_ENV === 'production';
-  // Jejak HTTP satu-baris ditangani hook httpLog (console.log, bypass level).
+  // Jejak HTTP satu-baris ditangani hook httpLog (console.log, bypass level):
+  // tampil di development saja — di production tidak dicetak, jadi terminal
+  // maupun ring buffer viewer web (GET /api/logs) dua-duanya bersih; baris
+  // HttpLog tetap ditulis untuk access log.
   // Logger Fastify: pretty di dev, JSON di prod.
   const app = Fastify({
     logger: {
