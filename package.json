@@ -17,6 +17,7 @@
     "test:aiToolChaining": "tsx --test tests/aiToolChaining.test.ts",
     "test:rateLimiter": "tsx --test tests/rateLimiter.test.ts",
     "test:messageValidator": "tsx --test tests/messageValidator.test.ts",
+    "test:youtubeSearch": "tsx --test tests/youtubeSearchMatch.test.ts",
     "type-check": "tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma db push",

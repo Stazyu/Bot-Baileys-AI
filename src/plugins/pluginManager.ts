@@ -6,7 +6,6 @@ import type { WASocket } from '@stazyu/baileys';
 import { log } from '../utils/logger.js';
 import type { PluginModule, CommandContext, CommandConfig, CategoryPlugin, CommandModule } from '../types/index.js';
 import { isOwner } from '../config/botConfig.js';
-import { rateLimiter } from '../utils/rateLimiter.js';
 import { userService } from '../services/userService.js';
 
 const __filename = fileURLToPath(import.meta.url);

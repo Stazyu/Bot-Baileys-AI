@@ -2,6 +2,12 @@ import type { CommandModule, CommandContext } from '../../types/index.js';
 import { youtubeDl, type Flags } from 'youtube-dl-exec';
 import { promises as fs } from 'fs';
 import path from 'path';
+import {
+  describeCandidate,
+  pickBestYoutubeMatch,
+  searchYoutubeCandidates,
+  type YoutubeDlRunner,
+} from '../../utils/youtubeSearch.js';
 
 interface YoutubeDlOutput {
   id?: string;
@@ -233,32 +239,45 @@ const youtubeCommand: CommandModule = {
         const tempDir = path.join(process.cwd(), 'temp');
         await fs.mkdir(tempDir, { recursive: true });
 
-        const searchOptions: Flags = {
-          noWarnings: true,
-          noCheckCertificates: true,
-          preferFreeFormats: true,
-          printJson: true,
-          simulate: true,
-          skipDownload: true,
-          defaultSearch: 'ytsearch1',
-        };
+        // Rank the search results against the request instead of taking
+        // whatever YouTube returned first (covers, compilations, wrong song).
+        const candidates = await searchYoutubeCandidates(
+          youtubeDl as unknown as YoutubeDlRunner,
+          query,
+          tempDir,
+        );
+        const match = pickBestYoutubeMatch(query, candidates);
 
-        const output = await youtubeDl(query, searchOptions, { cwd: tempDir }) as YoutubeDlOutput;
-
-        if (!output || !output.title) {
+        if (!match.best) {
           await context.socket.sendMessage(context.fromJid, {
             text: '❌ No results found for your search query.',
           });
           return;
         }
 
-        const videoUrl = output.webpage_url;
-        if (!videoUrl) {
+        console.log(
+          `[YouTube:play] 🔎 "${query}" → ${describeCandidate(match.best)} (confidence: ${match.confidence}, score: ${match.best.score.toFixed(2)})`,
+        );
+
+        const infoOptions: Flags = {
+          noWarnings: true,
+          noCheckCertificates: true,
+          preferFreeFormats: true,
+          printJson: true,
+          simulate: true,
+          skipDownload: true,
+        };
+
+        const output = await youtubeDl(match.best.url, infoOptions, { cwd: tempDir }) as YoutubeDlOutput;
+
+        if (!output || !output.title) {
           await context.socket.sendMessage(context.fromJid, {
             text: '❌ Failed to get video URL from search results.',
           });
           return;
         }
+
+        const videoUrl = output.webpage_url || match.best.url;
 
         const caption = `🎥 Choose download option for:
 

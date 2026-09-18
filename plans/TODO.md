@@ -1,7 +1,7 @@
 # Bot-Baileys-AI — TODO.md
 
 > Task list dan development roadmap.
-> **Versi:** 1.1.0 | **Last Updated:** 3 Agustus 2026
+> **Versi:** 1.1.0 | **Last Updated:** 15 September 2026
 
 ---
 
@@ -109,6 +109,13 @@
 - [ ] **AI Training/Finetuning** — Custom model fine-tuning
 - [ ] **More AI Tools** — Weather, calendar, calculators, etc.
 
+## 🔄 Recent Changes (15 September 2026)
+
+| Perubahan | Files | Status |
+|-----------|-------|--------|
+| **YouTube Search Match Check** — yt-dlp tidak lagi ambil hasil pertama (`ytsearch1`); 8 kandidat di-ranking terhadap judul/penyanyi yang diminta (toleran typo, penalti cover/compilation/karaoke), tool melaporkan urutan hasil + confidence, dan menolak download + menawarkan kandidat kalau tidak ada yang cocok | [`src/utils/youtubeSearch.ts`](src/utils/youtubeSearch.ts), [`src/tools/definitions/downloadYoutube.ts`](src/tools/definitions/downloadYoutube.ts), [`src/plugins/media/youtube.ts`](src/plugins/media/youtube.ts), [`src/services/systemPrompt.ts`](src/services/systemPrompt.ts), [`tests/youtubeSearchMatch.test.ts`](tests/youtubeSearchMatch.test.ts) | ✅ Done |
+| **Known Issues Audit** — Tabel Known Issues disinkronkan dengan kode: rate limiting, message persistence ke DB, dan dokumentasi gallery-dl ditandai Resolved; 2 gap baru dicatat (settings `ai:*` & `sec:*` tersimpan tapi belum dibaca runtime) | [`plans/TODO.md`](plans/TODO.md), [`AGENT.md`](AGENT.md), [`src/server/routes/settings.ts`](src/server/routes/settings.ts), [`src/plugins/pluginManager.ts`](src/plugins/pluginManager.ts) | ✅ Done |
+
 ## 🔄 Recent Changes (3 Agustus 2026)
 
 | Perubahan | Files | Status |
@@ -131,17 +138,19 @@
 | **'other' AI Provider** — Dukungan custom OpenAI-compatible API | [`src/services/aiService.ts`](src/services/aiService.ts), [`.env.example`](.env.example) | ✅ Done |
 | **Env Cleanup** — Hapus `SEARXNG_URL`, tambah `FIRECRAWL_URL`, `GALLERY_DL_*`, `OTHER_*` | [`.env.example`](.env.example) | ✅ Done |
 
-## Known Issues
+## Known Issues (audit terakhir: 15 September 2026)
 
 | Issue | Status | Priority | Notes |
 |-------|--------|----------|-------|
-| YouTube auto-download tidak fully implemented | 🟡 Open | Medium | Hanya fallback ke command manual |
-| gallery-dl binary harus diinstall manual | 🟡 Open | Medium | Perlu dokumentasi instalasi |
-| Message saving ke DB di-comment out | 🟡 Open | Low | Perlu diaktifkan jika diperlukan |
-| Some type safety issues dengan Baileys types | 🟡 Open | Medium | Perlu deklarasi tipe yang lebih ketat |
-| Tidak ada rate limiting | 🟡 Open | High | Bisa menyebabkan spam |
-| Plugin hot reload belum support | 🟡 Open | Low | Butuh restart untuk reload plugin |
-| Group metadata cache TTL 5 menit | 🟡 Open | Low | Konfigurasikan sesuai kebutuhan |
+| YouTube auto-download tidak fully implemented | 🟡 Open | Medium | `downloadYouTube()` di [`src/bot/autoDownload.ts`](src/bot/autoDownload.ts) hanya balas "belum diimplementasi penuh" + arahkan ke command `!youtube` |
+| gallery-dl binary harus diinstall manual | 🟢 Resolved | Medium | Cara install, `GALLERY_DL_BIN`, cookies, dan troubleshooting sudah terdokumentasi di [README.md](README.md) + [.env.example](.env.example) |
+| Message saving ke DB di-comment out | 🟢 Resolved | Low | Aktif via [`src/services/messageService.ts`](src/services/messageService.ts) (`prisma.message.create`) — dipanggil inbound & outbound dari [`src/bot/botHandler.ts`](src/bot/botHandler.ts) dan routes session |
+| Some type safety issues dengan Baileys types | 🟡 Open | Medium | Masih ±52 pemakaian `any` di `src/` (terbanyak `botHandler.ts` & `pluginManager.ts`, mis. `key: key as any` di [`src/session/sessionManager.ts`](src/session/sessionManager.ts)) |
+| Tidak ada rate limiting | 🟢 Resolved | High | Ada [`src/utils/rateLimiter.ts`](src/utils/rateLimiter.ts): cooldown per-command, per-pesan non-command, AI privat 2s, AI grup 3s — dipasang di [`src/bot/botHandler.ts`](src/bot/botHandler.ts). Sisi API: 300 req/menit global + 5 req/menit untuk `POST /api/sessions`. `bot:cooldownSec` bisa diubah live dari Settings |
+| Plugin hot reload belum support | 🟡 Open | Low | Tidak ada watcher (`fs.watch`/`chokidar`) di `src/` — butuh restart untuk reload plugin |
+| Group metadata cache TTL 5 menit | 🟡 Open | Low | `cachedGroupMetadata` di [`src/session/sessionManager.ts`](src/session/sessionManager.ts) pakai `stdTTL: 5 * 60`; cache nama grup di `botHandler.ts` terpisah (1 jam) |
+| Settings AI dashboard (`ai:*`) tidak dibaca runtime | 🟡 Open | High | `PATCH /api/settings` menulis ke tabel `botConfig`, tapi [`src/services/aiService.ts`](src/services/aiService.ts) baca `process.env` saat boot dan `MAX_TOOL_ROUNDS` malah hardcoded `6` — override provider/model/prompt/maxToolRounds/stream/groupAutoReply/groupMentionOnly/toolsEnabled tersimpan tapi tidak berefek |
+| Settings Security dashboard (`sec:*`) belum enforced | 🟡 Open | High | `blockUnknownJid`, `logAllMessages`, `rateLimitPerMinute` tidak punya consumer; limit API hardcoded `max: 300`/menit di [`src/server/index.ts`](src/server/index.ts) |
 | AI model bias tambah tahun ke query search | 🟢 Resolved | Medium | Diatasi dgn instruksi eksplisit di system prompt + dynamic year injection |
 | Tool call artifacts muncul di response | 🟢 Resolved | Medium | Diatasi dgn stripToolCallArtifacts() filter |
 

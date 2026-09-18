@@ -6,7 +6,16 @@ import type {
 } from '../../types/tools.js';
 import path from 'path';
 import { promises as fs } from 'fs';
+import { create as createYoutubeDl } from 'youtube-dl-exec';
 import { log } from '../../utils/logger.js';
+import {
+  describeCandidate,
+  pickBestYoutubeMatch,
+  searchYoutubeCandidates,
+  type RankedCandidate,
+  type YoutubeDlRunner,
+  type YoutubeMatchResult,
+} from '../../utils/youtubeSearch.js';
 
 interface YoutubeDlInfo {
   id?: string;
@@ -28,35 +37,66 @@ const baseYoutubeDlFlags = {
   preferFreeFormats: true,
 };
 
+interface ResolvedYoutubeInput {
+  /** Video the tool will download (search winner, or the URL's own metadata). */
+  info: YoutubeDlInfo | null;
+  /** Ranking of the search candidates; null when the input was a URL. */
+  match: YoutubeMatchResult | null;
+}
+
 const resolveYoutubeInput = async (
-  youtubeDl: (input: string, flags?: Record<string, any>, options?: Record<string, any>) => Promise<unknown>,
+  youtubeDl: YoutubeDlRunner,
   input: string,
   tempDir: string
-): Promise<YoutubeDlInfo | null> => {
+): Promise<ResolvedYoutubeInput> => {
   const trimmedInput = input.trim();
 
   if (isYouTubeUrl(trimmedInput)) {
-    return await youtubeDl(normalizeYouTubeUrl(trimmedInput), {
+    const info = await youtubeDl(normalizeYouTubeUrl(trimmedInput), {
       ...baseYoutubeDlFlags,
       dumpJson: true,
     }, { cwd: tempDir }) as YoutubeDlInfo;
+    return { info, match: null };
   }
 
-  const searchResult = await youtubeDl(trimmedInput, {
-    ...baseYoutubeDlFlags,
-    printJson: true,
-    simulate: true,
-    skipDownload: true,
-    defaultSearch: 'ytsearch1',
-  }, { cwd: tempDir }) as YoutubeDlInfo;
+  const candidates = await searchYoutubeCandidates(youtubeDl, trimmedInput, tempDir);
+  const match = pickBestYoutubeMatch(trimmedInput, candidates);
 
-  if (!searchResult?.webpage_url) {
-    return searchResult?.id
-      ? { ...searchResult, webpage_url: `https://www.youtube.com/watch?v=${searchResult.id}` }
-      : null;
-  }
+  if (!match.best) return { info: null, match };
 
-  return searchResult;
+  return {
+    info: {
+      id: match.best.id,
+      title: match.best.title,
+      uploader: match.best.uploader,
+      duration: match.best.duration,
+      webpage_url: match.best.url,
+    },
+    match,
+  };
+};
+
+/** Candidate list + confidence, handed to the model so it can correct itself. */
+const matchToData = (match: YoutubeMatchResult | null) => {
+  if (!match) return undefined;
+
+  const all: RankedCandidate[] = match.best
+    ? [match.best, ...match.alternates]
+    : match.alternates;
+
+  return {
+    confidence: match.confidence,
+    matchedRank: match.best?.rank ?? null,
+    matchScore: match.best ? Number(match.best.score.toFixed(2)) : null,
+    candidates: all.map((candidate) => ({
+      rank: candidate.rank,
+      title: candidate.title,
+      uploader: candidate.uploader,
+      score: Number(candidate.score.toFixed(2)),
+      penalties: candidate.penalties.length > 0 ? candidate.penalties : undefined,
+      url: candidate.url,
+    })),
+  };
 };
 
 /**
@@ -68,7 +108,7 @@ export const definition: AIToolDefinition = {
   type: 'function',
   function: {
     name: 'download_youtube',
-    description: 'Download video or audio from YouTube. Accepts EITHER a YouTube URL OR a plain search query / song title / keywords. For songs, the tool will search YouTube automatically via yt-dlp — no need to call web_search first.',
+    description: 'Download video or audio from YouTube. Accepts EITHER a YouTube URL OR a plain search query / song title / keywords. For songs, the tool searches YouTube via yt-dlp, ranks the results against the requested title/artist, and downloads the best match — no need to call web_search first. The result reports the matched search rank and how confident the match is; when nothing matches, it returns the candidate list so you can ask the user instead of sending the wrong song.',
     parameters: {
       type: 'object',
       properties: {
@@ -315,13 +355,40 @@ async function doDownloadYoutube(params: DownloadParams): Promise<ToolExecuteRes
   );
 
   try {
-    const { create } = await import('youtube-dl-exec');
-    const youtubeDl = create('yt-dlp');
+    // Library types assume a single-video extraction; we also issue raw
+    // yt-dlp calls (`dumpSingleJson`, `flatPlaylist`, `extractAudio`).
+    const youtubeDl = createYoutubeDl('yt-dlp') as unknown as YoutubeDlRunner;
     const tempDir = path.join(process.cwd(), 'temp');
 
     await fs.mkdir(tempDir, { recursive: true });
 
-    const initialInfo = await resolveYoutubeInput(youtubeDl as any, input, tempDir);
+    const { info: initialInfo, match } = await resolveYoutubeInput(youtubeDl, input, tempDir);
+
+    if (match) {
+      const candidateList = [match.best, ...match.alternates]
+        .filter((candidate): candidate is RankedCandidate => candidate !== null)
+        .map((candidate) => `${candidate.rank}) "${candidate.title}" — ${candidate.uploader}`)
+        .join(' | ');
+
+      log.info(
+        `[Tool:YouTube] 🔎 Search "${input}" → ${match.best ? `#${match.best.rank} "${match.best.title}" (confidence: ${match.confidence}, score: ${match.best.score.toFixed(2)})` : 'no candidates'}`,
+      );
+
+      // Nothing in the search results corresponds to the request: refuse to
+      // guess and let the model ask the user instead of sending a random song.
+      if (!match.best || match.confidence === 'none') {
+        return {
+          success: false,
+          message:
+            `Tidak ada hasil pencarian YouTube yang cocok dengan "${input}". ` +
+            (candidateList ? `Kandidat terdekat: ${candidateList}. ` : '') +
+            'JANGAN download sekarang. Tanya user lagu mana yang dimaksud (sebutkan kandidat di atas), ' +
+            'atau panggil ulang download_youtube dengan judul lengkap dari kandidat yang dipilih user.',
+          data: { query: input, match: matchToData(match) },
+        };
+      }
+    }
+
     const resolvedUrl = initialInfo?.webpage_url ||
       (initialInfo?.id ? `https://www.youtube.com/watch?v=${initialInfo.id}` : isYouTubeUrl(input) ? normalizeYouTubeUrl(input) : input);
 
@@ -334,7 +401,11 @@ async function doDownloadYoutube(params: DownloadParams): Promise<ToolExecuteRes
       : initialInfo;
 
     if (!info || !info.title) {
-      return { success: false, message: 'Gagal menemukan video YouTube dari URL atau judul yang diberikan.' };
+      return {
+        success: false,
+        message: 'Gagal menemukan video YouTube dari URL atau judul yang diberikan.',
+        data: { query: input, match: matchToData(match) },
+      };
     }
 
     const title = info.title || 'Unknown';
@@ -417,10 +488,30 @@ async function doDownloadYoutube(params: DownloadParams): Promise<ToolExecuteRes
       }, TEMP_FILE_CLEANUP_MS);
     }
 
+    const confidence = match?.confidence ?? 'high';
+    const matchReport = match?.best
+      ? `Hasil pencarian: ${describeCandidate(match.best)} (skor kecocokan ${match.best.score.toFixed(2)}, confidence: ${confidence}).`
+      : '';
+    const matchWarning = match && confidence !== 'high'
+      ? ' PENTING: kecocokan rendah — kemungkinan bukan lagu yang user minta. Sebutkan judul + channel di atas dan tanya singkat apakah itu yang dimaksud.'
+      : ' Sebutkan judul + channel ke user supaya dia bisa koreksi kalau bukan lagu yang dimaksud.';
+
     const result: ToolExecuteResult = {
       success: true,
-      message: `Berhasil mendownload ${format === 'audio' ? 'audio' : 'video'} YouTube "${title}". Media sudah dikirim ke user.`,
-      data: { title, uploader, duration: durationStr, format, quality, fileSize: stats.size, asDocument, resolvedUrl },
+      message: `Berhasil mendownload ${format === 'audio' ? 'audio' : 'video'} YouTube "${title}". Media sudah dikirim ke user. ${matchReport}${matchWarning}`,
+      data: {
+        title,
+        uploader,
+        duration: durationStr,
+        format,
+        quality,
+        fileSize: stats.size,
+        asDocument,
+        resolvedUrl,
+        matchedRank: match?.best?.rank ?? null,
+        matchConfidence: confidence,
+        match: matchToData(match),
+      },
     };
 
     rememberDownload(sessionKey, input, format, asDocument, result);

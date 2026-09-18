@@ -113,7 +113,7 @@ Bot-Baileys-AI/
 ├── scripts/
 │   └── migrateAuthState.ts           ← Auth state migration script
 └── plans/                            ← Planning docs
-    ├── TODO.md, ROADMAP.md
+    ├── TODO.md, ROADMAP.md             ← Known Issues + roadmap
     ├── ai-tooling-plan.md
     └── architecture-documentation.md
 ```
@@ -216,7 +216,7 @@ Two distinct prompts in [`src/services/systemPrompt.ts`](src/services/systemProm
 | `web_search` | Search the web via DuckDuckGo |
 | `web_fetch` | Scrape & read a web page (via Firecrawl) |
 | `download_social_media` | Download from Instagram, TikTok, Facebook, Twitter/X |
-| `download_youtube` | Download YouTube video or audio |
+| `download_youtube` | Download YouTube video or audio (ranks 8 search candidates against the requested title/artist) |
 | `pinterest_search` | Search images on Pinterest |
 | `gallery_dl_sticker` | Create WhatsApp sticker from gallery-dl URL or keyword |
 

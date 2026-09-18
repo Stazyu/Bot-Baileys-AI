@@ -176,7 +176,8 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
             if ((AI_TOOLS as readonly string[]).includes(tool)) entries[`ai:tool:${tool}`] = String(enabled);
           }
         }
-        // AI service baca env saat boot — override DB berlaku setelah restart.
+        // Belum ada loader yang membaca ai:* dari DB — override tersimpan tapi tidak
+        // berefek ke runtime (aiService baca process.env saat boot). Lihat plans/TODO.md.
         requiresRestart.push('ai');
       }
 
