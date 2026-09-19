@@ -10,6 +10,7 @@ import pino from 'pino';
 import pinoPretty from 'pino-pretty';
 import { Boom } from '@hapi/boom';
 import prisma from '../database/prisma.js';
+import { storedKey, storedMessage } from '../services/messageService.js';
 import { usePrismaAuthState } from '../libs/baileys/usePrismaAuthState.js';
 import { log } from '../utils/logger.js';
 import { bus } from '../server/events.js';
@@ -80,11 +81,24 @@ export class SessionManager {
         generateHighQualityLinkPreview: true,
         cachedGroupMetadata: async (jid) => this.groupCache.get(jid),
         getMessage: async (key) => {
-          return (await prisma.message.findFirst({
-            where: {
-              key: key as any,
-            },
-          })) as any;
+          if (!key?.id) return undefined;
+          try {
+            const rows = await prisma.message.findMany({
+              where: { sessionId },
+              orderBy: { createdAt: 'desc' },
+              take: 100,
+              select: { key: true, message: true },
+            });
+            for (const row of rows) {
+              const stored = storedKey(row.key);
+              if (stored?.id !== key.id) continue;
+              const message = storedMessage(row.message);
+              if (message) return message;
+            }
+            return undefined;
+          } catch {
+            return undefined;
+          }
         },
       });
 
@@ -313,11 +327,10 @@ export class SessionManager {
     if (!socket) throw new Error(`Session "${sessionId}" tidak aktif`);
     const digits = phoneNumber.replace(/\D/g, '');
     if (digits.length < 8) throw new Error('Nomor HP tidak valid');
-    const api = socket as unknown as { requestPairingCode?: (phone: string) => Promise<string> };
-    if (typeof api.requestPairingCode !== 'function') {
+    if (typeof socket.requestPairingCode !== 'function') {
       throw new Error('Pairing code tidak didukung versi Baileys ini');
     }
-    const code = await api.requestPairingCode(digits);
+    const code = await socket.requestPairingCode(digits);
     bus.emitLink({ sessionId, pairingCode: code });
     return code;
   }

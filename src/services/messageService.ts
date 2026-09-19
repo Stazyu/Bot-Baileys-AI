@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import type { AnyMessageContent, proto, WAMessageKey } from '@stazyu/baileys';
 import prisma from '../database/prisma.js';
 import sessionManager from '../session/sessionManager.js';
 import { log } from '../utils/logger.js';
@@ -39,8 +40,8 @@ async function pnFromDb(lid: string): Promise<string | null> {
       select: { key: true },
     });
     for (const row of rows) {
-      const k = row.key as unknown;
-      if (!k || typeof k !== 'object' || !('remoteJid' in k) || !('remoteJidAlt' in k)) continue;
+      const k = storedKey(row.key);
+      if (!k) continue;
       if (k.remoteJid === lid && typeof k.remoteJidAlt === 'string' && k.remoteJidAlt.length > 0) {
         return k.remoteJidAlt;
       }
@@ -71,8 +72,11 @@ export async function resolvePn(sessionId: string, jid: string): Promise<string>
 const knownSessions = new Set<string>();
 const MAX_BLOB_CHARS = 100_000;
 
+/** Values ever written to the Message table's Json columns. */
+type StoredBlob = proto.IMessage | WAMessageKey | AnyMessageContent;
+
 /** Serialisasi aman untuk kolom Json — potong blob raksasa, jangan pernah throw. */
-export function toJson(value: unknown): Prisma.InputJsonValue {
+export function toJson(value: StoredBlob): Prisma.InputJsonValue {
   try {
     const text = JSON.stringify(value ?? {}, (_, v: unknown) => {
       if (typeof v === 'bigint') return String(v);
@@ -87,7 +91,7 @@ export function toJson(value: unknown): Prisma.InputJsonValue {
 }
 
 /** Normalisasi timestamp Baileys (detik) ke BigInt. */
-function toTimestampSeconds(value: unknown): bigint {
+function toTimestampSeconds(value: proto.IWebMessageInfo['messageTimestamp']): bigint {
   const num = Number(value);
   if (Number.isFinite(num) && num > 0) return BigInt(Math.floor(num));
   return BigInt(Math.floor(Date.now() / 1000));
@@ -104,19 +108,33 @@ async function ensureSession(sessionId: string): Promise<void> {
 }
 
 /** Normalisasi payload kirim ({ text }) ke bentuk blob chat agar extractText bisa baca. */
-function normalizeOutbound(content: unknown): unknown {
-  if (content && typeof content === 'object' && 'text' in content) {
-    const text = content.text;
-    if (typeof text === 'string') return { conversation: text };
+function normalizeOutbound(content: AnyMessageContent): proto.IMessage | AnyMessageContent {
+  if ('text' in content && typeof content.text === 'string') {
+    return { conversation: content.text };
   }
   return content;
 }
 
+/**
+ * The `message` column stores a `proto.IMessage` written by `toJson` — this is the
+ * only place that knows the column's shape, so the cast is centralized here.
+ */
+export function storedMessage(value: Prisma.JsonValue): proto.IMessage | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as unknown as proto.IMessage;
+}
+
+/** The `key` column stores a `WAMessageKey` written by `toJson`. */
+export function storedKey(value: Prisma.JsonValue): WAMessageKey | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as unknown as WAMessageKey;
+}
+
 export async function persistInboundMessage(opts: {
   sessionId: string;
-  key: unknown;
-  message: unknown;
-  messageTimestamp: unknown;
+  key: WAMessageKey;
+  message: proto.IMessage;
+  messageTimestamp: proto.IWebMessageInfo['messageTimestamp'];
   pushName?: string;
 }): Promise<void> {
   try {
@@ -140,7 +158,7 @@ export async function persistInboundMessage(opts: {
 export async function persistOutboundMessage(opts: {
   sessionId: string;
   to: string;
-  content: unknown;
+  content: AnyMessageContent;
 }): Promise<void> {
   try {
     await ensureSession(opts.sessionId);

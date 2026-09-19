@@ -1,5 +1,6 @@
 import { log } from './logger.js';
-
+import { extractTextFromMessage } from './messageHelper.js';
+import type { proto } from '@stazyu/baileys';
 export interface ValidationResult {
   valid: boolean;
   reason?: string;
@@ -61,17 +62,10 @@ export function stopValidatorCleanup(): void {
 }
 
 /**
- * Extract the text body from any WAMessage type.
+ * Human-readable text of a message payload, wrapped containers included.
  */
-function extractMessageBody(message: Record<string, any>): string | null {
-  if (typeof message.conversation === 'string') return message.conversation;
-  if (typeof message.extendedTextMessage?.text === 'string') return message.extendedTextMessage.text;
-  if (typeof message.imageMessage?.caption === 'string') return message.imageMessage.caption;
-  if (typeof message.videoMessage?.caption === 'string') return message.videoMessage.caption;
-  if (typeof message.documentMessage?.caption === 'string') return message.documentMessage.caption;
-  if (typeof message.audioMessage?.caption === 'string') return message.audioMessage.caption;
-  if (typeof message.stickerMessage?.caption === 'string') return message.stickerMessage.caption;
-  return null;
+function extractMessageBody(message: proto.IMessage | null | undefined): string | null {
+  return extractTextFromMessage(message);
 }
 
 /**
@@ -93,7 +87,7 @@ function isValidJid(jid: string | null | undefined): boolean {
  * @returns ValidationResult with `valid: true` or `valid: false` plus reason
  */
 export function validateMessage(
-  msg: Record<string, any>,
+  msg: proto.IWebMessageInfo,
   options?: ValidationOptions,
 ): ValidationResult {
   const opts: Required<ValidationOptions> = { ...DEFAULT_OPTIONS, ...options };
@@ -108,12 +102,12 @@ export function validateMessage(
     return { valid: false, reason: 'Message key is missing', code: 'NO_MESSAGE' };
   }
 
-  const remoteJid: string | undefined = msg.key.remoteJid;
+  const remoteJid = msg.key.remoteJid;
   if (!isValidJid(remoteJid)) {
     return { valid: false, reason: `Invalid remoteJid: ${remoteJid}`, code: 'INVALID_JID' };
   }
 
-  const participant: string | undefined = msg.key.participant;
+  const participant = msg.key.participant;
   if (participant && !isValidJid(participant)) {
     return { valid: false, reason: `Invalid participant JID: ${participant}`, code: 'INVALID_JID' };
   }
@@ -124,7 +118,7 @@ export function validateMessage(
   }
 
   // ── 4. Duplicate message detection ────────────────────────────────────
-  const msgId: string | undefined = msg.key.id;
+  const msgId = msg.key.id;
   if (msgId) {
     const lastSeen = recentMessageIds.get(msgId);
     const now = Date.now();

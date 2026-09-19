@@ -1,5 +1,5 @@
 import type { CommandModule } from '../../types/index.js';
-import { downloadContentFromMessage } from '@stazyu/baileys';
+import { downloadContentFromMessage, proto } from '@stazyu/baileys';
 import { Sticker, StickerTypes } from 'wa-sticker-formatter';
 import { spawn } from 'child_process';
 import { writeFile, unlink, readFile } from 'fs/promises';
@@ -97,20 +97,21 @@ const stickerCommand: CommandModule = {
 
     try {
       // Download the media from the message
-      let mediaMessage: any;
+      let mediaMessage: proto.Message.IImageMessage | proto.Message.IVideoMessage;
       let mediaType: 'image' | 'video' = 'image';
 
       if (isQuotedVideo) {
         // Get quoted video message
-        const quoted = message.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-        if (!quoted || !quoted.videoMessage) {
+        const quoted = simplified?.quotedInfo?.quotedMessage || message.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+        const videoMessage = quoted?.videoMessage;
+        if (!videoMessage) {
           throw new Error('No quoted video message found');
         }
-        mediaMessage = quoted.videoMessage;
+        mediaMessage = videoMessage;
         mediaType = 'video';
 
         // Check video duration (max 5 seconds)
-        const videoDuration = mediaMessage.seconds;
+        const videoDuration = videoMessage.seconds;
         if (videoDuration && videoDuration > 5) {
           await context.socket.sendMessage(context.fromJid, {
             text: `❌ Video is too long (${videoDuration}s). Maximum duration is 5 seconds.`,
@@ -119,14 +120,15 @@ const stickerCommand: CommandModule = {
         }
       } else if (isVideo) {
         // Get direct video message
-        mediaMessage = message.message?.videoMessage;
-        if (!mediaMessage) {
+        const videoMessage = message.message?.videoMessage;
+        if (!videoMessage) {
           throw new Error('No video message found');
         }
+        mediaMessage = videoMessage;
         mediaType = 'video';
 
         // Check video duration (max 5 seconds)
-        const videoDuration = mediaMessage.seconds;
+        const videoDuration = videoMessage.seconds;
         if (videoDuration && videoDuration > 5) {
           await context.socket.sendMessage(context.fromJid, {
             text: `❌ Video is too long (${videoDuration}s). Maximum duration is 5 seconds.`,
@@ -135,18 +137,20 @@ const stickerCommand: CommandModule = {
         }
       } else if (isQuotedImage) {
         // Get quoted image message
-        const quoted = message.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-        if (!quoted || !quoted.imageMessage) {
+        const quoted = simplified?.quotedInfo?.quotedMessage || message.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+        const imageMessage = quoted?.imageMessage;
+        if (!imageMessage) {
           throw new Error('No quoted image message found');
         }
-        mediaMessage = quoted.imageMessage;
+        mediaMessage = imageMessage;
         mediaType = 'image';
       } else if (isImage) {
         // Get direct image message
-        mediaMessage = message.message?.imageMessage;
-        if (!mediaMessage) {
+        const imageMessage = message.message?.imageMessage;
+        if (!imageMessage) {
           throw new Error('No image message found');
         }
+        mediaMessage = imageMessage;
         mediaType = 'image';
       } else {
         throw new Error('No media found in message');

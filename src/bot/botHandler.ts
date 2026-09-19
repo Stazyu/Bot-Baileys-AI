@@ -1,4 +1,5 @@
 import { proto, WAMessage, WAMessageUpdate, WASocket } from '@stazyu/baileys';
+import type { AnyMessageContent, BaileysEventMap } from '@stazyu/baileys';
 import PluginManager from '../plugins/pluginManager.js';
 import { detectSocialMediaLink, downloadFromSocialMedia } from './autoDownload.js';
 import { getPrefixes, isMaintenance, getMaintenanceMessage, isOwner } from '../config/botConfig.js';
@@ -16,7 +17,14 @@ import { userService } from '../services/userService.js';
 import { premiumService } from '../services/premiumService.js';
 import { bus } from '../server/events.js';
 import { persistInboundMessage, persistOutboundMessage } from '../services/messageService.js';
-
+import {
+  unwrapMessage,
+  getRealContentType,
+  extractTextFromMessage,
+  extractContextInfo,
+  extractInteractiveButtonId,
+  type MessageType,
+} from '../utils/messageHelper.js';
 moment.locale('jv');
 
 // Color utility for console output
@@ -35,9 +43,57 @@ const color = (text: string, colorName: string): string => {
   return `${colors[colorName] || colors.white}${text}${colors.reset}`;
 };
 
-type MessageType = keyof WAMessage['message'];
+/** Lowercased error message, for classifying send/AI failures. */
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+}
 
-export type SimplifiedMessage = ReturnType<BotHandler['simplified']>;
+/** Normalized view of one incoming message, consumed by handlers and plugins. */
+export interface SimplifiedMessage {
+  id: string | null | undefined;
+  from: string | null | undefined;
+  fromMe: boolean | null | undefined;
+  participant: string | null | undefined;
+  isGroup: boolean | undefined;
+  type: MessageType | null;
+  body: string;
+  messageTimeStamp: proto.IWebMessageInfo['messageTimestamp'];
+  timeStampHandler: number;
+  quotedInfo: proto.IContextInfo | undefined;
+  quotedMessageType: MessageType | undefined;
+  botNumber: string;
+  mentions: string[] | undefined;
+  user_id: string | undefined;
+  pushName: string | null | undefined;
+  groupName: string | null | undefined;
+  isMedia: boolean;
+  isAudio: boolean;
+  isImage: boolean;
+  isVideo: boolean;
+  isSticker: boolean;
+  isDocument: boolean;
+  isButtonMessage: boolean;
+  isButtonResponseMessage: boolean;
+  isTemplateButtonReplyMessage: boolean;
+  isListResponseMessage: boolean;
+  isInteractiveResponseMessage: boolean;
+  isQuotedAudio: boolean;
+  isQuotedImage: boolean;
+  isQuotedVideo: boolean;
+  isQuotedSticker: boolean;
+  isQuotedDocument: boolean;
+  isQuotedMedia: boolean;
+  message_prefix: string | null;
+  message_button: string | null;
+  message: string | null;
+  command: string | null;
+  args: string[];
+  isCmd: boolean;
+  matchedPrefix: string | null;
+  time: string;
+  date: string;
+  prefix: string;
+}
 
 export class BotHandler {
   private socket: WASocket;
@@ -100,42 +156,44 @@ export class BotHandler {
     }
   }
 
-  private simplified(msg: WAMessage) {
-    // console.log('msg :', msg);
+  public simplified(msg: WAMessage): SimplifiedMessage {
+    // Unwrap any container (ephemeral, viewOnce, etc.) to expose the innermost payload
+    const unwrapped = unwrapMessage(msg.message);
+    if (unwrapped) {
+      msg.message = unwrapped;
+    }
     const chatMessage = msg.message;
     const id = msg.key?.id;
     const from = msg.key?.remoteJid;
     const fromMe = msg.key?.fromMe;
     const participant = msg.key?.participant;
     const isGroup = from?.endsWith('@g.us');
-    const type = !!chatMessage
-      ? (Object.keys(chatMessage!).filter((v, i) => v !== 'messageContextInfo')[0] as MessageType)
-      : null;
-    const body =
-      msg.message?.conversation ||
-      msg.message?.imageMessage?.caption ||
-      msg.message?.videoMessage?.caption ||
-      msg.message?.extendedTextMessage?.text;
+    const type = getRealContentType(chatMessage);
+
+    // Extract human-readable text from any message type (text, caption, button, interactive, etc.)
+    const text = extractTextFromMessage(chatMessage);
+    const body = text ?? '';
+
     const messageTimeStamp = msg.messageTimestamp;
     const timeStampHandler = Date.now();
-    const quotedInfo =
-      type === 'extendedTextMessage' && (msg.message?.extendedTextMessage?.contextInfo?.quotedMessage || msg.message?.extendedTextMessage?.contextInfo?.mentionedJid)
-        ? msg.message?.extendedTextMessage?.contextInfo
-        : undefined;
+
+    // Extract contextInfo and quotedMessage across all possible message types
+    const quotedInfo = extractContextInfo(chatMessage);
     const quotedMessageType = quotedInfo?.quotedMessage
-      ? (Object.getOwnPropertyNames(quotedInfo.quotedMessage)[0] as MessageType)
+      ? (getRealContentType(quotedInfo.quotedMessage) ?? undefined)
       : undefined;
 
     const prefixes = getPrefixes();
     const botNumber = this.socket.user?.id?.split(':')[0] + '@s.whatsapp.net';
-    const mentions = type === 'extendedTextMessage' ? quotedInfo?.mentionedJid : undefined;
+    const mentions = quotedInfo?.mentionedJid ?? undefined;
     const time = moment().utcOffset(7).format('HH:mm:ss');
     const date = moment().utcOffset(7).format('Do MMMM YYYY, h:mm:ss a');
 
     /* ============ Meta User ============ */
+    // participantAlt/remoteJidAlt are the PN form; fall back to the raw JID.
     const rawUserId = isGroup
-      ? (msg?.key as any)?.participantAlt as string
-      : (msg?.key as any)?.remoteJidAlt as string;
+      ? msg.key?.participantAlt || msg.key?.participant
+      : msg.key?.remoteJidAlt || msg.key?.remoteJid;
     const user_id = rawUserId?.replace(/:\d+@s\.whatsapp\.net$/, '@s.whatsapp.net');
     const pushName = msg.pushName;
 
@@ -143,35 +201,24 @@ export class BotHandler {
     const groupName = isGroup ? from : null;
 
     /* ========== Message type ========== */
-    const isMedia =
-      type === 'imageMessage' || type === 'videoMessage' || type === 'audioMessage' || type === 'stickerMessage';
     const isAudio = type === 'audioMessage';
     const isImage = type === 'imageMessage';
     const isVideo = type === 'videoMessage';
     const isSticker = type === 'stickerMessage';
     const isDocument = type === 'documentMessage';
+    const isMedia = isAudio || isImage || isVideo || isSticker || isDocument;
     const isButtonMessage = type === 'buttonsMessage';
     const isButtonResponseMessage = type === 'buttonsResponseMessage';
     const isTemplateButtonReplyMessage = type === 'templateButtonReplyMessage';
     const isListResponseMessage = type === 'listResponseMessage';
     const isInteractiveResponseMessage = type === 'interactiveResponseMessage';
-    const isQuotedAudio = type === 'extendedTextMessage' && quotedMessageType === 'audioMessage';
-    const isQuotedImage = type === 'extendedTextMessage' && quotedMessageType === 'imageMessage';
-    const isQuotedVideo = type === 'extendedTextMessage' && quotedMessageType === 'videoMessage';
-    const isQuotedSticker = type === 'extendedTextMessage' && quotedMessageType === 'stickerMessage';
-    const isQuotedDocument = type === 'extendedTextMessage' && quotedMessageType === 'documentMessage';
+    const isQuotedAudio = quotedMessageType === 'audioMessage';
+    const isQuotedImage = quotedMessageType === 'imageMessage';
+    const isQuotedVideo = quotedMessageType === 'videoMessage';
+    const isQuotedSticker = quotedMessageType === 'stickerMessage';
+    const isQuotedDocument = quotedMessageType === 'documentMessage';
     const isQuotedMedia = isQuotedAudio || isQuotedImage || isQuotedVideo || isQuotedSticker || isQuotedDocument;
 
-    // Check if message starts with any of the configured prefixes
-    const getText = () => {
-      if (type === 'conversation') return msg?.message?.conversation;
-      if (type === 'imageMessage') return msg?.message?.imageMessage?.caption;
-      if (type === 'videoMessage') return msg?.message?.videoMessage?.caption;
-      if (type === 'extendedTextMessage') return msg?.message?.extendedTextMessage?.text;
-      return null;
-    };
-
-    const text = getText();
     let matchedPrefix: string | null = null;
     let message_prefix: string | null = null;
 
@@ -184,61 +231,37 @@ export class BotHandler {
         }
       }
     }
-    const getInteractiveButtonId = () => {
-      const paramsJson = msg?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-      if (paramsJson) {
-        try {
-          const parsed = JSON.parse(paramsJson);
-          return parsed.id;
-        } catch {
-          return null;
-        }
-      }
-      return null;
-    };
 
     const message_button =
       type === 'buttonsResponseMessage'
-        ? msg?.message?.buttonsResponseMessage?.selectedButtonId
+        ? (chatMessage?.buttonsResponseMessage?.selectedButtonId || null)
         : type === 'templateMessage'
-          ? msg?.message?.templateMessage?.hydratedTemplate?.templateId
+          ? (chatMessage?.templateMessage?.hydratedTemplate?.templateId || null)
           : type === 'templateButtonReplyMessage'
-            ? msg?.message?.templateButtonReplyMessage?.selectedId
+            ? (chatMessage?.templateButtonReplyMessage?.selectedId || null)
             : type === 'listResponseMessage'
-              ? msg?.message?.listResponseMessage?.singleSelectReply?.selectedRowId
+              ? (chatMessage?.listResponseMessage?.singleSelectReply?.selectedRowId || null)
               : type === 'interactiveResponseMessage'
-                ? getInteractiveButtonId()
+                ? extractInteractiveButtonId(chatMessage)
                 : null;
-    let message =
-      type === 'conversation'
-        ? msg?.message?.conversation
-        : type === 'extendedTextMessage'
-          ? msg?.message?.extendedTextMessage?.text
-          : type === 'imageMessage'
-            ? msg?.message?.imageMessage?.caption
-            : type === 'videoMessage'
-              ? msg?.message?.videoMessage?.caption
-              : null;
-    message = message && typeof message !== 'object' && matchedPrefix ? null : message;
 
     const command =
       message_button !== null
-        ? message_button?.toLowerCase()
+        ? message_button.toLowerCase()
         : message_prefix !== null && matchedPrefix
-          ? String(message_prefix)?.slice(matchedPrefix.length)?.trim()?.split(/ +/)?.shift()?.toLowerCase()
+          ? message_prefix.slice(matchedPrefix.length).trim().split(/ +/).shift()?.toLowerCase() || null
           : null;
+
     const args =
-      message && typeof message !== 'object'
-        ? message.trim().split(/ +/).slice(1)
-        : message_prefix !== null
-          ? message_prefix.trim().split(/ +/).slice(1)
+      message_prefix !== null && matchedPrefix
+        ? message_prefix.slice(matchedPrefix.length).trim().split(/ +/).slice(1)
+        : text
+          ? text.trim().split(/ +/).slice(1)
           : [];
-    const isCmd =
-      message && typeof message !== 'object'
-        ? prefixes.some(p => message.startsWith(p))
-        : message_prefix !== null
-          ? prefixes.some(p => message_prefix.startsWith(p))
-          : false;
+
+    const isCmd = message_button !== null || (matchedPrefix !== null && command !== null && command.length > 0);
+
+    const message = text ?? null;
 
     return {
       id,
@@ -350,33 +373,130 @@ export class BotHandler {
     log.info(`✅ [BotHandler] All event handlers registered for session: ${this.sessionId}`);
   }
 
-  private printLog(msg: ReturnType<typeof this.simplified>): void {
-    const { time, date, isCmd, message, command, groupName, isGroup, isMedia, isTemplateButtonReplyMessage, isButtonResponseMessage, message_button, prefix, isAudio, isSticker, user_id } = msg;
+  private printLog(msg: SimplifiedMessage): void {
+    const {
+      time,
+      date,
+      isCmd,
+      message,
+      command,
+      groupName,
+      isGroup,
+      isMedia,
+      isSticker,
+      isTemplateButtonReplyMessage,
+      isButtonResponseMessage,
+      isInteractiveResponseMessage,
+      message_button,
+      prefix,
+      user_id,
+      from,
+      type,
+    } = msg;
 
-    if (!isCmd && isGroup && !isMedia && !isSticker && !command && !message_button) {
-      console.log(color(`[GROUP || MSG]`, 'blue'), color('=>', 'white'), color(`TIME: ${time}`, 'yellow'), color(`DATE: ${date}`, 'yellow'), color(message!, 'blue'), color('FROM', 'white'), color(String(user_id).split('@')[0], 'yellow'), color('IN', 'white'), color(groupName!, 'yellow'));
+    const sender = String(user_id || from || '').split('@')[0] || 'unknown';
+    const targetGroup = groupName || from || 'Group';
+    const displayMsg = message || (type ? `[${type}]` : '[No Content]');
+
+    if (isCmd && isGroup) {
+      console.log(
+        color('[GROUP || CMD]', 'cyan'),
+        color('=>', 'white'),
+        color(`TIME: ${time}`, 'yellow'),
+        color(`DATE: ${date}`, 'yellow'),
+        color((prefix || '') + (command || ''), 'green'),
+        color('FROM', 'white'),
+        color(sender, 'yellow'),
+        color('IN', 'white'),
+        color(targetGroup, 'yellow'),
+      );
+      return;
     }
-    if (!isCmd && !isGroup && !isMedia && !isSticker && !command && !message_button) {
-      console.log(color(`[PRIVATE || MSG]`, 'blue'), color('=>', 'white'), color(`TIME: ${time}`, 'yellow'), color(`DATE: ${date}`, 'yellow'), color(message!, 'blue'), color('FROM', 'white'), color(String(user_id).split('@')[0], 'yellow'));
+
+    if (isCmd && !isGroup) {
+      console.log(
+        color('[PRIVATE || CMD]', 'cyan'),
+        color('=>', 'white'),
+        color(`TIME: ${time}`, 'yellow'),
+        color(`DATE: ${date}`, 'yellow'),
+        color((prefix || '') + (command || ''), 'green'),
+        color('FROM', 'white'),
+        color(sender, 'yellow'),
+      );
+      return;
     }
-    if (isCmd && isGroup && !isMedia && !isSticker) {
-      console.log(color(`[GROUP || CMD]`, 'cyan'), color('=>', 'white'), color(`TIME: ${time}`, 'yellow'), color(`DATE: ${date}`, 'yellow'), color(prefix + command, 'green'), color('FROM', 'white'), color(String(user_id).split('@')[0], 'yellow'), color('IN', 'white'), color(groupName!, 'yellow'));
+
+    const isButton = isTemplateButtonReplyMessage || isButtonResponseMessage || isInteractiveResponseMessage;
+    if (isButton && message_button) {
+      const tag = isGroup ? '[GROUP || BUTTON]' : '[PRIVATE || BUTTON]';
+      const parts = [
+        color(tag, 'magenta'),
+        color('=>', 'white'),
+        color(`TIME: ${time}`, 'yellow'),
+        color(`DATE: ${date}`, 'yellow'),
+        color(message_button, 'magenta'),
+        color('FROM', 'white'),
+        color(sender, 'yellow'),
+      ];
+      if (isGroup) {
+        parts.push(color('IN', 'white'), color(targetGroup, 'yellow'));
+      }
+      console.log(...parts);
+      return;
     }
-    if (isCmd && !isGroup && !isMedia && !isSticker) {
-      console.log(color(`[PRIVATE || CMD]`, 'cyan'), color('=>', 'white'), color(`TIME: ${time}`, 'yellow'), color(`DATE: ${date}`, 'yellow'), color(prefix + command, 'green'), color('FROM', 'white'), color(String(user_id).split('@')[0], 'yellow'));
+
+    if (isGroup && (isMedia || isSticker)) {
+      console.log(
+        color('[GROUP || MEDIA]', 'blue'),
+        color('=>', 'white'),
+        color(`TIME: ${time}`, 'yellow'),
+        color(`DATE: ${date}`, 'yellow'),
+        color(`[${type || 'media'}]${message ? `: ${message}` : ''}`, 'blue'),
+        color('FROM', 'white'),
+        color(sender, 'yellow'),
+        color('IN', 'white'),
+        color(targetGroup, 'yellow'),
+      );
+      return;
     }
-    if (isTemplateButtonReplyMessage && isGroup && !isMedia && !isSticker) {
-      console.log(color(`[GROUP || BUTTON]`, 'magenta'), color('=>', 'white'), color(`TIME: ${time}`, 'yellow'), color(`DATE: ${date}`, 'yellow'), color(message_button!, 'magenta'), color('FROM', 'white'), color(String(user_id).split('@')[0], 'yellow'), color('IN', 'white'), color(groupName!, 'yellow'));
+
+    if (!isGroup && (isMedia || isSticker)) {
+      console.log(
+        color('[PRIVATE || MEDIA]', 'blue'),
+        color('=>', 'white'),
+        color(`TIME: ${time}`, 'yellow'),
+        color(`DATE: ${date}`, 'yellow'),
+        color(`[${type || 'media'}]${message ? `: ${message}` : ''}`, 'blue'),
+        color('FROM', 'white'),
+        color(sender, 'yellow'),
+      );
+      return;
     }
-    if (isTemplateButtonReplyMessage && !isGroup && !isMedia && !isSticker) {
-      console.log(color(`[PRIVATE || BUTTON]`, 'magenta'), color('=>', 'white'), color(`TIME: ${time}`, 'yellow'), color(`DATE: ${date}`, 'yellow'), color(message_button!, 'magenta'), color('FROM', 'white'), color(String(user_id).split('@')[0], 'yellow'));
+
+    if (isGroup) {
+      console.log(
+        color('[GROUP || MSG]', 'blue'),
+        color('=>', 'white'),
+        color(`TIME: ${time}`, 'yellow'),
+        color(`DATE: ${date}`, 'yellow'),
+        color(displayMsg, 'blue'),
+        color('FROM', 'white'),
+        color(sender, 'yellow'),
+        color('IN', 'white'),
+        color(targetGroup, 'yellow'),
+      );
+      return;
     }
-    if (isButtonResponseMessage && isGroup && !isMedia && !isSticker) {
-      console.log(color(`[GROUP || BUTTON]`, 'magenta'), color('=>', 'white'), color(`TIME: ${time}`, 'yellow'), color(`DATE: ${date}`, 'yellow'), color(message_button!, 'magenta'), color('FROM', 'white'), color(String(user_id).split('@')[0], 'yellow'), color('IN', 'white'), color(groupName!, 'yellow'));
-    }
-    if (isButtonResponseMessage && !isGroup && !isMedia && !isSticker) {
-      console.log(color(`[PRIVATE || BUTTON]`, 'magenta'), color('=>', 'white'), color(`TIME: ${time}`, 'yellow'), color(`DATE: ${date}`, 'yellow'), color(message_button!, 'magenta'), color('FROM', 'white'), color(String(user_id).split('@')[0], 'yellow'));
-    }
+
+    console.log(
+      color('[PRIVATE || MSG]', 'blue'),
+      color('=>', 'white'),
+      color(`TIME: ${time}`, 'yellow'),
+      color(`DATE: ${date}`, 'yellow'),
+      color(displayMsg, 'blue'),
+      color('FROM', 'white'),
+      color(sender, 'yellow'),
+    );
   }
 
   private async handleMessage(message: WAMessage): Promise<void> {
@@ -386,8 +506,13 @@ export class BotHandler {
         return;
       }
 
+      // Unwrap any container (ephemeral, viewOnce, etc.) to expose the innermost payload
+      const unwrapped = unwrapMessage(message.message);
+      if (unwrapped) {
+        message.message = unwrapped;
+      }
       // ── Step 2: Comprehensive message validation ─────────────────────────
-      const validation = validateMessage(message as unknown as Record<string, any>);
+      const validation = validateMessage(message);
 
       if (!validation.valid) {
         // Log silently for common noise (self-sent, fromMe, duplicates)
@@ -411,7 +536,7 @@ export class BotHandler {
         try {
           const actualGroupName = await this.getGroupName(simplified.from);
           if (actualGroupName) {
-            (simplified as any).groupName = actualGroupName;
+            simplified.groupName = actualGroupName;
           }
         } catch (error) {
           log.error(`[${this.sessionId}] ⚠️ Failed to fetch group name for ${simplified.from}:`, error as object);
@@ -458,14 +583,14 @@ export class BotHandler {
 
   private async handleMessageUpdate(update: WAMessageUpdate): Promise<void> {
     try {
-      log.debug(`[${this.sessionId}] 📝 Message update received`, update as unknown as object);
+      log.debug(`[${this.sessionId}] 📝 Message update received`, update);
       // Handle message updates (read receipts, edits, etc.)
     } catch (error) {
       log.error(`[${this.sessionId}] ❌ Error handling message update:`, error as object);
     }
   }
 
-  private async handleGroupEvent(event: any): Promise<void> {
+  private async handleGroupEvent(event: BaileysEventMap['group-participants.update']): Promise<void> {
     try {
       log.info(`[${this.sessionId}] 👥 Group event: ${event.action || 'unknown'} in ${event.id}`);
 
@@ -480,9 +605,9 @@ export class BotHandler {
     }
   }
 
-  private async processMessage(message: WAMessage, simplified: ReturnType<typeof this.simplified>): Promise<void> {
+  private async processMessage(message: WAMessage, simplified: SimplifiedMessage): Promise<void> {
     try {
-      const { command, args, botNumber, from, isCmd, body, isGroup, user_id, mentions, message: rawMessage, quotedInfo } = simplified;
+      const { command, args, from, isCmd, body, isGroup, user_id, mentions, quotedInfo } = simplified;
 
       // ── User auto-registration (fire & forget, non-blocking) ──────────
       if (user_id) {
@@ -766,7 +891,7 @@ export class BotHandler {
     }
   }
 
-  private async handleGroupAutoReply(simplified: ReturnType<typeof this.simplified>, to: string, originalMessage: WAMessage): Promise<void> {
+  private async handleGroupAutoReply(simplified: SimplifiedMessage, to: string, originalMessage: WAMessage): Promise<void> {
     try {
       let message = simplified.message || simplified.body || '';
 
@@ -853,8 +978,8 @@ export class BotHandler {
       bus.emitActivity({ type: 'ai', sessionId: this.sessionId, detail: 'AI replied in group' });
       this.trackReply();
       void persistOutboundMessage({ sessionId: this.sessionId, to, content: { text: safeResponse } });
-    } catch (error: any) {
-      const errorMessage = error?.message?.toLowerCase() || '';
+    } catch (error) {
+      const errorMessage = errorText(error);
       let userFriendlyMessage: string;
 
       if (errorMessage.includes('empty after all retries') || errorMessage.includes('empty response')) {
@@ -880,7 +1005,7 @@ export class BotHandler {
     }
   }
 
-  private async handleAIMessage(simplified: ReturnType<typeof this.simplified>, message: string, to: string, originalMessage: WAMessage): Promise<void> {
+  private async handleAIMessage(simplified: SimplifiedMessage, message: string, to: string, originalMessage: WAMessage): Promise<void> {
     try {
       const userId = simplified.user_id || to;
 
@@ -957,8 +1082,8 @@ export class BotHandler {
       bus.emitActivity({ type: 'ai', sessionId: this.sessionId, detail: 'AI replied to private chat' });
       this.trackReply();
       void persistOutboundMessage({ sessionId: this.sessionId, to, content: { text: safeResponse } });
-    } catch (error: any) {
-      const errorMessage = error?.message?.toLowerCase() || '';
+    } catch (error) {
+      const errorMessage = errorText(error);
       let userFriendlyMessage: string;
 
       if (errorMessage.includes('empty after all retries') || errorMessage.includes('empty response')) {
@@ -989,7 +1114,7 @@ export class BotHandler {
     if (this.inboundAt > 0) bus.recordReplyLatency(Date.now() - this.inboundAt);
   }
 
-  async sendMessage(jid: string, content: any): Promise<void> {
+  async sendMessage(jid: string, content: AnyMessageContent): Promise<void> {
     try {
       // Validate JID before sending
       const jidValidation = validateJid(jid);
@@ -1000,8 +1125,8 @@ export class BotHandler {
       await this.socket.sendMessage(jid, content);
       this.trackReply();
       void persistOutboundMessage({ sessionId: this.sessionId, to: jid, content });
-    } catch (error: any) {
-      const errorMsg = error?.message?.toLowerCase() || '';
+    } catch (error) {
+      const errorMsg = errorText(error);
       if (errorMsg.includes('rate-overlimit') || errorMsg.includes('429')) {
         log.warn(`[${this.sessionId}] ⚠️ Send rate-limited, backing off`);
       } else if (errorMsg.includes('not-authorized') || errorMsg.includes('403')) {
@@ -1012,19 +1137,16 @@ export class BotHandler {
     }
   }
 
-  async replyToMessage(jid: string, quoted: any, content: any): Promise<void> {
+  async replyToMessage(jid: string, quoted: WAMessage, content: AnyMessageContent): Promise<void> {
     try {
       const jidValidation = validateJid(jid);
       if (!jidValidation.valid) {
         log.error(`[${this.sessionId}] ❌ Invalid target JID for replyToMessage: ${jid}`);
         return;
       }
-      await this.socket.sendMessage(jid, {
-        ...content,
-        quoted,
-      });
-    } catch (error: any) {
-      const errorMsg = error?.message?.toLowerCase() || '';
+      await this.socket.sendMessage(jid, content, { quoted });
+    } catch (error) {
+      const errorMsg = errorText(error);
       if (errorMsg.includes('rate-overlimit') || errorMsg.includes('429')) {
         log.warn(`[${this.sessionId}] ⚠️ Reply rate-limited, backing off`);
       } else if (errorMsg.includes('not-authorized') || errorMsg.includes('403')) {

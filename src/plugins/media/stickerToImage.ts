@@ -1,5 +1,5 @@
 import type { CommandModule } from '../../types/index.js';
-import { downloadContentFromMessage } from '@stazyu/baileys';
+import { downloadContentFromMessage, proto } from '@stazyu/baileys';
 
 const stickerToImageCommand: CommandModule = {
   config: {
@@ -29,21 +29,23 @@ const stickerToImageCommand: CommandModule = {
 
     try {
       // Download the sticker from the message
-      let stickerMessage: any;
+      let stickerMessage: proto.Message.IStickerMessage;
 
       if (isQuotedSticker) {
         // Get quoted sticker message
-        const quoted = message.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-        if (!quoted || !quoted.stickerMessage) {
+        const quoted = simplified?.quotedInfo?.quotedMessage || message.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+        const quotedSticker = quoted?.stickerMessage;
+        if (!quotedSticker) {
           throw new Error('No quoted sticker message found');
         }
-        stickerMessage = quoted.stickerMessage;
+        stickerMessage = quotedSticker;
       } else if (isSticker) {
         // Get direct sticker message
-        stickerMessage = message.message?.stickerMessage;
-        if (!stickerMessage) {
+        const directSticker = message.message?.stickerMessage;
+        if (!directSticker) {
           throw new Error('No sticker message found');
         }
+        stickerMessage = directSticker;
       } else {
         throw new Error('No sticker found in message');
       }
