@@ -1,8 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import type { Prisma } from '@prisma/client';
+import type { proto, WAMessageKey } from '@stazyu/baileys';
 import { z } from 'zod';
 import prisma from '../../database/prisma.js';
 import { parseQuery, stringBool } from '../validate.js';
+import { storedKey, storedMessage } from '../../services/messageService.js';
+import { extractTextFromMessage, getRealContentType } from '../../utils/messageHelper.js';
 
 const messagesQuery = z.object({
   sessionId: z.string().max(64).optional(),
@@ -21,23 +24,15 @@ const commandsQuery = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-/** Ekstrak teks human-readable dari blob message Baileys. */
-function extractText(message: unknown): string {
-  if (!message || typeof message !== 'object') return '';
-  const m = message as Record<string, unknown>;
-  if (typeof m.conversation === 'string') return m.conversation;
-  const ext = m.extendedTextMessage as Record<string, unknown> | undefined;
-  if (ext && typeof ext.text === 'string') return ext.text;
-  for (const key of ['imageMessage', 'videoMessage', 'documentMessage', 'audioMessage'] as const) {
-    const media = m[key] as Record<string, unknown> | undefined;
-    if (media) {
-      const caption = typeof media.caption === 'string' && media.caption ? `: ${media.caption}` : '';
-      return `[${key.replace('Message', '')}]${caption}`;
-    }
-  }
-  if (m.stickerMessage) return '[sticker]';
-  if (m.reactionMessage) return '[reaction]';
-  if (m.pollCreationMessage) return '[poll]';
+/** Human-readable text of a Baileys message blob (unwrapped). */
+function extractText(message: proto.IMessage | null): string {
+  const type = getRealContentType(message);
+  const text = extractTextFromMessage(message);
+  if (text) return text;
+  if (type === 'stickerMessage') return '[sticker]';
+  if (type === 'reactionMessage') return '[reaction]';
+  if (type === 'pollCreationMessage' || type === 'pollCreationMessageV2' || type === 'pollCreationMessageV3') return '[poll]';
+  if (type) return `[${type.replace('Message', '')}]`;
   return '[media]';
 }
 
@@ -72,7 +67,7 @@ export async function registerMessageRoutes(app: FastifyInstance): Promise<void>
           sessionId: row.sessionId,
           fromMe: row.fromMe,
           pushName: row.pushName,
-          text: extractText(row.message).slice(0, 500),
+          text: extractText(storedMessage(row.message)).slice(0, 500),
           timestamp: toIso(Number(row.messageTimestamp)),
           createdAt: row.createdAt.toISOString(),
         })),
@@ -134,14 +129,11 @@ const conversationsQuery = z.object({
   messageLimit: z.coerce.number().int().min(1).max(100).default(30),
 });
 
-function jidField(key: unknown, field: 'remoteJid' | 'remoteJidAlt' | 'participant' | 'participantAlt'): string | null {
-  if (!key || typeof key !== 'object') return null;
-  const value = (key as Record<string, unknown>)[field];
-  return typeof value === 'string' && value.length > 0 ? value : null;
-}
+type JidField = 'remoteJid' | 'remoteJidAlt' | 'participant' | 'participantAlt';
 
-function chatOf(key: unknown): string | null {
-  return jidField(key, 'remoteJid');
+function jidField(key: WAMessageKey | null, field: JidField): string | null {
+  const value = key?.[field];
+  return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
 /**
@@ -149,7 +141,7 @@ function chatOf(key: unknown): string | null {
  * Groups: participantAlt ?? participant; private: remoteJidAlt ?? remoteJid.
  * Same as simplified() in botHandler (auto-save users path).
  */
-function displayJid(key: unknown, remoteJid: string | null): string | null {
+function displayJid(key: WAMessageKey | null, remoteJid: string | null): string | null {
   if (remoteJid?.endsWith('@g.us')) {
     return jidField(key, 'participantAlt') ?? jidField(key, 'participant') ?? remoteJid;
   }
@@ -161,7 +153,7 @@ function displayJid(key: unknown, remoteJid: string | null): string | null {
  * outbound PN land in the same thread), except groups which stay
  * grouped per group JID.
  */
-function groupOf(key: unknown): string | null {
+function groupOf(key: WAMessageKey | null): string | null {
   const remoteJid = jidField(key, 'remoteJid');
   if (!remoteJid) return null;
   if (remoteJid.endsWith('@g.us')) return remoteJid;
@@ -187,7 +179,7 @@ export async function registerConversationRoutes(app: FastifyInstance): Promise<
       });
       const groups = new Map<string, typeof rows>();
       for (const row of rows) {
-        const chat = groupOf(row.key);
+        const chat = groupOf(storedKey(row.key));
         if (!chat) continue;
         const list = groups.get(chat);
         if (list) list.push(row);
@@ -204,14 +196,14 @@ export async function registerConversationRoutes(app: FastifyInstance): Promise<
               id: row.id,
               fromMe: row.fromMe,
               pushName: row.pushName ?? (row.fromMe ? 'Bot' : '—'),
-              body: extractText(row.message).slice(0, 1000),
+              body: extractText(storedMessage(row.message)).slice(0, 1000),
               timestamp: toIso(Number(row.messageTimestamp)),
               createdAt: row.createdAt.toISOString(),
             }));
           return {
             id: chat,
             sessionId: newest.sessionId,
-            userJid: displayJid((inbound ?? newest).key, chat) ?? chat,
+            userJid: displayJid(storedKey((inbound ?? newest).key), chat) ?? chat,
             pushName: inbound?.pushName ?? newest.pushName ?? chat.split('@')[0],
             lastMessage: messages.length > 0 ? messages[messages.length - 1].body : '',
             lastMessageAt: newest.createdAt.toISOString(),

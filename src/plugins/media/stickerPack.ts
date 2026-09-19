@@ -1,6 +1,6 @@
 import type { CommandModule } from '../../types/index.js';
 import type { SimplifiedMessage } from '../../bot/botHandler.js';
-import type { WAMessage, WASocket, Sticker as PackSticker } from '@stazyu/baileys';
+import type { WAMessage, WASocket, Sticker as PackSticker, proto } from '@stazyu/baileys';
 import { downloadContentFromMessage } from '@stazyu/baileys';
 import { Sticker, StickerTypes } from 'wa-sticker-formatter';
 import { deflateSync } from 'zlib';
@@ -150,9 +150,12 @@ function expandAlbumTarget(msg: WAMessage, key: string): WAMessage[] {
  * WAMessage-like object. The embedded content carries media fields directly
  * (e.g. `.imageMessage`, `.stickerMessage`) — exactly what isMediaMessage and
  * downloadMediaFromMessage inspect.
+ *
+ * Only `message` is read downstream, but WAMessage requires `key`; the empty
+ * cast is confined here because callers never touch it.
  */
-function wrapContent(content: unknown): WAMessage {
-  return { message: (content ?? {}) as object } as unknown as WAMessage;
+function wrapContent(content: proto.IMessage | null | undefined): WAMessage {
+  return { key: {}, message: content ?? {} } as WAMessage;
 }
 
 /**
@@ -186,7 +189,7 @@ function resolveTargets(
     }
 
     // 1b. Fall back to the embedded quotedMessage (always present on replies).
-    const quotedMsg = wrapContent(ctxInfo.quotedMessage ?? {});
+    const quotedMsg = wrapContent(ctxInfo.quotedMessage);
     if (isAlbumMember(quotedMsg)) {
       const expanded = expandAlbumTarget(quotedMsg, key);
       if (expanded.length > 0) return expanded;
@@ -271,16 +274,18 @@ function createSolidPng(width: number, height: number, rgb: [number, number, num
 /** Download media from a raw WAMessage that directly carries image/video/sticker. */
 async function downloadMediaFromMessage(msg: WAMessage): Promise<{ buffer: Buffer; isSticker: boolean } | null> {
   const m = msg.message;
-  let mediaMessage: any = null;
-  let mediaType: 'sticker' | 'image' | 'video' = 'sticker';
+  if (!m) return null;
 
-  if (m?.imageMessage) {
+  let mediaMessage: proto.Message.IImageMessage | proto.Message.IVideoMessage | proto.Message.IStickerMessage;
+  let mediaType: 'sticker' | 'image' | 'video';
+
+  if (m.imageMessage) {
     mediaMessage = m.imageMessage;
     mediaType = 'image';
-  } else if (m?.videoMessage) {
+  } else if (m.videoMessage) {
     mediaMessage = m.videoMessage;
     mediaType = 'video';
-  } else if (m?.stickerMessage) {
+  } else if (m.stickerMessage) {
     mediaMessage = m.stickerMessage;
     mediaType = 'sticker';
   } else {
