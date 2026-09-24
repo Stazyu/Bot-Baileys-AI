@@ -29,9 +29,16 @@ export interface DownloadResult {
 }
 
 /**
+ * Minimal send surface used by auto-download. botHandler passes a wrapper
+ * around the raw WASocket that also persists replies to Chat Logs — a raw
+ * socket would leave auto-download responses invisible in the dashboard.
+ */
+export type MediaSender = Pick<WASocket, 'sendMessage'>;
+
+/**
  * Send error message to user
  */
-async function sendErrorMessage(socket: WASocket, fromJid: string, message: string): Promise<void> {
+async function sendErrorMessage(socket: MediaSender, fromJid: string, message: string): Promise<void> {
   await socket.sendMessage(fromJid, { text: message });
 }
 
@@ -67,7 +74,7 @@ export function detectSocialMediaLink(text: string): SocialMediaLink | null {
  */
 export async function downloadFromSocialMedia(
   link: SocialMediaLink,
-  socket: WASocket,
+  socket: MediaSender,
   fromJid: string
 ): Promise<DownloadResult> {
   try {
@@ -102,7 +109,7 @@ export async function downloadFromSocialMedia(
   }
 }
 
-async function downloadInstagram(url: string, socket: WASocket, fromJid: string): Promise<DownloadResult> {
+async function downloadInstagram(url: string, socket: MediaSender, fromJid: string): Promise<DownloadResult> {
   try {
     const startTime = Date.now();
     const result = await instagramDownload(url);
@@ -180,7 +187,7 @@ async function downloadInstagram(url: string, socket: WASocket, fromJid: string)
   }
 }
 
-async function downloadTikTok(url: string, socket: WASocket, fromJid: string): Promise<DownloadResult> {
+async function downloadTikTok(url: string, socket: MediaSender, fromJid: string): Promise<DownloadResult> {
   try {
     const startTime = Date.now();
     console.log('Downloading TikTok:', url);
@@ -257,7 +264,7 @@ async function downloadTikTok(url: string, socket: WASocket, fromJid: string): P
   }
 }
 
-async function downloadYouTube(url: string, socket: WASocket, fromJid: string): Promise<DownloadResult> {
+async function downloadYouTube(url: string, socket: MediaSender, fromJid: string): Promise<DownloadResult> {
   try {
     const startTime = Date.now();
     const result = await nexo.youtube(url);
@@ -289,7 +296,7 @@ async function downloadYouTube(url: string, socket: WASocket, fromJid: string): 
   }
 }
 
-async function downloadFacebook(url: string, socket: WASocket, fromJid: string): Promise<DownloadResult> {
+async function downloadFacebook(url: string, socket: MediaSender, fromJid: string): Promise<DownloadResult> {
   try {
     const startTime = Date.now();
     const result = await nexo.facebook(url);
@@ -325,7 +332,7 @@ async function downloadFacebook(url: string, socket: WASocket, fromJid: string):
   }
 }
 
-async function downloadTwitter(url: string, socket: WASocket, fromJid: string): Promise<DownloadResult> {
+async function downloadTwitter(url: string, socket: MediaSender, fromJid: string): Promise<DownloadResult> {
   try {
     await socket.sendMessage(fromJid, {
       text: '⏳ Mendownload media dari Twitter/X...',

@@ -4,7 +4,7 @@ import type { proto, WAMessageKey } from '@stazyu/baileys';
 import { z } from 'zod';
 import prisma from '../../database/prisma.js';
 import { parseQuery, stringBool } from '../validate.js';
-import { storedKey, storedMessage } from '../../services/messageService.js';
+import { resolvePn, storedKey, storedMessage } from '../../services/messageService.js';
 import { extractTextFromMessage, getRealContentType } from '../../utils/messageHelper.js';
 
 const messagesQuery = z.object({
@@ -148,17 +148,23 @@ function displayJid(key: WAMessageKey | null, remoteJid: string | null): string 
   return jidField(key, 'remoteJidAlt') ?? remoteJid?.replace(/:\d+@s\.whatsapp\.net$/, '@s.whatsapp.net') ?? null;
 }
 
+/** Strip the Baileys device suffix (:8@s.whatsapp.net) so PN forms compare equal. */
+function normalizeJid(jid: string | null | undefined): string | null {
+  if (typeof jid !== 'string' || jid.length === 0) return null;
+  return jid.replace(/:\d+@s\.whatsapp\.net$/, '@s.whatsapp.net');
+}
+
 /**
- * Conversation grouping key: real number when available (so inbound LID and
- * outbound PN land in the same thread), except groups which stay
- * grouped per group JID.
+ * Every identity one row belongs to: raw remoteJid + PN alt (deduped), so a
+ * LID row and a PN row of the same person can be unioned into one thread.
+ * Groups only expose the group JID (participants are not part of the key).
  */
-function groupOf(key: WAMessageKey | null): string | null {
-  const remoteJid = jidField(key, 'remoteJid');
-  if (!remoteJid) return null;
-  if (remoteJid.endsWith('@g.us')) return remoteJid;
-  // Alt (PN) preferred; fallback strips the device suffix so legacy rows without alt still merge.
-  return jidField(key, 'remoteJidAlt') ?? remoteJid.replace(/:\d+@s\.whatsapp\.net$/, '@s.whatsapp.net');
+function aliasesOf(key: WAMessageKey | null): string[] {
+  const remoteJid = normalizeJid(jidField(key, 'remoteJid'));
+  if (!remoteJid) return [];
+  if (remoteJid.endsWith('@g.us')) return [remoteJid];
+  const alt = normalizeJid(jidField(key, 'remoteJidAlt'));
+  return alt && alt !== remoteJid ? [remoteJid, alt] : [remoteJid];
 }
 
 /**
@@ -177,10 +183,45 @@ export async function registerConversationRoutes(app: FastifyInstance): Promise<
         orderBy: { createdAt: 'desc' },
         take: 1000,
       });
+
+      // ── Alias union (fix: one user showing up as duplicate threads) ────
+      // The same person appears as LID (…@lid), PN with a device suffix, or
+      // bare PN depending on the row. Union every alias a row carries, then
+      // resolve LIDs through the signal store, so each user maps to ONE thread.
+      const parent = new Map<string, string>();
+      const find = (x: string): string => {
+        const p = parent.get(x);
+        if (p === undefined || p === x) return x;
+        const root = find(p);
+        parent.set(x, root);
+        return root;
+      };
+      const union = (a: string, b: string): void => {
+        const ra = find(a);
+        const rb = find(b);
+        if (ra !== rb) parent.set(ra, rb);
+      };
+
+      const lids = new Map<string, string>();
+      for (const row of rows) {
+        const aliases = aliasesOf(storedKey(row.key));
+        if (aliases.length === 2) union(aliases[0], aliases[1]);
+        const lid = aliases.find((a) => a.endsWith('@lid'));
+        if (lid && !lids.has(lid)) lids.set(lid, row.sessionId);
+      }
+      // Authoritative LID → PN lookup (cached in messageService; no-op when unknown).
+      await Promise.all(
+        [...lids.entries()].map(async ([lid, sessionId]) => {
+          const pn = await resolvePn(sessionId, lid);
+          if (pn !== lid) union(lid, pn);
+        }),
+      );
+
       const groups = new Map<string, typeof rows>();
       for (const row of rows) {
-        const chat = groupOf(storedKey(row.key));
-        if (!chat) continue;
+        const primary = aliasesOf(storedKey(row.key))[0];
+        if (!primary) continue;
+        const chat = find(primary);
         const list = groups.get(chat);
         if (list) list.push(row);
         else groups.set(chat, [row]);
@@ -190,7 +231,8 @@ export async function registerConversationRoutes(app: FastifyInstance): Promise<
           const newest = list[0];
           const inbound = list.find((r) => !r.fromMe);
           const messages = list
-            .slice(-query.messageLimit)
+            // rows are newest-first → keep the LATEST N, oldest→newest for display.
+            .slice(0, query.messageLimit)
             .reverse()
             .map((row) => ({
               id: row.id,
@@ -200,10 +242,19 @@ export async function registerConversationRoutes(app: FastifyInstance): Promise<
               timestamp: toIso(Number(row.messageTimestamp)),
               createdAt: row.createdAt.toISOString(),
             }));
+          // Display/reply target: prefer the PN form even when the thread's
+          // newest row only carries a LID.
+          const aliases = new Set<string>();
+          for (const r of list) for (const a of aliasesOf(storedKey(r.key))) aliases.add(a);
+          const pnAlias = [...aliases].find((a) => a.endsWith('@s.whatsapp.net'));
+          const primary = storedKey((inbound ?? newest).key);
+          const userJid = chat.endsWith('@g.us')
+            ? (displayJid(primary, chat) ?? chat)
+            : (pnAlias ?? displayJid(primary, chat) ?? chat);
           return {
             id: chat,
             sessionId: newest.sessionId,
-            userJid: displayJid(storedKey((inbound ?? newest).key), chat) ?? chat,
+            userJid,
             pushName: inbound?.pushName ?? newest.pushName ?? chat.split('@')[0],
             lastMessage: messages.length > 0 ? messages[messages.length - 1].body : '',
             lastMessageAt: newest.createdAt.toISOString(),

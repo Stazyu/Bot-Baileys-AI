@@ -1,7 +1,7 @@
 import { proto, WAMessage, WAMessageUpdate, WASocket } from '@stazyu/baileys';
 import type { AnyMessageContent, BaileysEventMap } from '@stazyu/baileys';
 import PluginManager from '../plugins/pluginManager.js';
-import { detectSocialMediaLink, downloadFromSocialMedia } from './autoDownload.js';
+import { detectSocialMediaLink, downloadFromSocialMedia, type MediaSender } from './autoDownload.js';
 import { getPrefixes, isMaintenance, getMaintenanceMessage, isOwner } from '../config/botConfig.js';
 import { isAIModeEnabled } from '../plugins/ai/aiCommand.js';
 import { isAIModeEnabled as isAIModeEnabledAsync, initAIModePersistence } from '../services/aiModePersistence.js';
@@ -753,7 +753,16 @@ export class BotHandler {
           const socialLink = detectSocialMediaLink(body);
           if (socialLink) {
             log.info(`[${this.sessionId}] 🔗 Social media link detected: ${socialLink.platform} - ${socialLink.url}`);
-            await downloadFromSocialMedia(socialLink, this.socket, from);
+            // autoDownload sends through a raw socket (bypassing this.sendMessage),
+            // so wrap it — otherwise the replies never land in Chat Logs.
+            const sender: MediaSender = {
+              sendMessage: async (jid, content, options) => {
+                const sent = await this.socket.sendMessage(jid, content, options);
+                void persistOutboundMessage({ sessionId: this.sessionId, to: jid, content });
+                return sent;
+              },
+            };
+            await downloadFromSocialMedia(socialLink, sender, from);
             bus.emitActivity({ type: 'download', sessionId: this.sessionId, detail: `${socialLink.platform} media saved` });
             return;
           }
