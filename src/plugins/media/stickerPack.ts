@@ -1,7 +1,7 @@
 import type { CommandModule } from '../../types/index.js';
 import type { SimplifiedMessage } from '../../bot/botHandler.js';
 import type { WAMessage, WASocket, Sticker as PackSticker, proto } from '@stazyu/baileys';
-import { downloadContentFromMessage } from '@stazyu/baileys';
+import { downloadMediaBuffer, safeMediaHost } from '../../utils/mediaDownload.js';
 import { Sticker, StickerTypes } from 'wa-sticker-formatter';
 import { deflateSync } from 'zlib';
 import { log } from '../../utils/logger.js';
@@ -272,7 +272,7 @@ function createSolidPng(width: number, height: number, rgb: [number, number, num
 // ---------------------------------------------------------------------------
 
 /** Download media from a raw WAMessage that directly carries image/video/sticker. */
-async function downloadMediaFromMessage(msg: WAMessage): Promise<{ buffer: Buffer; isSticker: boolean } | null> {
+async function downloadMediaFromMessage(msg: WAMessage, socketMediaHost?: string): Promise<{ buffer: Buffer; isSticker: boolean } | null> {
   const m = msg.message;
   if (!m) return null;
 
@@ -292,11 +292,7 @@ async function downloadMediaFromMessage(msg: WAMessage): Promise<{ buffer: Buffe
     return null;
   }
 
-  const stream = await downloadContentFromMessage(mediaMessage, mediaType);
-  let buffer = Buffer.from([]);
-  for await (const chunk of stream) {
-    buffer = Buffer.concat([buffer, chunk]);
-  }
+  const buffer = await downloadMediaBuffer(mediaMessage, mediaType, socketMediaHost);
   if (!buffer || buffer.length === 0) return null;
   return { buffer, isSticker: mediaType === 'sticker' };
 }
@@ -348,6 +344,7 @@ const stickerPackCommand: CommandModule = {
 
     // Add N media messages to the collection; returns how many were added.
     const addMediaMessages = async (targets: WAMessage[], coll: PackCollection): Promise<{ added: number; skipped: number }> => {
+      const socketMediaHost = safeMediaHost(socket);
       let added = 0;
       let skipped = 0;
       for (const target of targets) {
@@ -356,7 +353,7 @@ const stickerPackCommand: CommandModule = {
           continue;
         }
         try {
-          const media = await downloadMediaFromMessage(target);
+          const media = await downloadMediaFromMessage(target, socketMediaHost);
           if (!media) {
             skipped += 1;
             continue;

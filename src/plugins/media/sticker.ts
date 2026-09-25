@@ -1,5 +1,6 @@
 import type { CommandModule } from '../../types/index.js';
-import { downloadContentFromMessage, proto } from '@stazyu/baileys';
+import { proto } from '@stazyu/baileys';
+import { downloadMediaBuffer, safeMediaHost } from '../../utils/mediaDownload.js';
 import { Sticker, StickerTypes } from 'wa-sticker-formatter';
 import { spawn } from 'child_process';
 import { writeFile, unlink, readFile } from 'fs/promises';
@@ -156,17 +157,11 @@ const stickerCommand: CommandModule = {
         throw new Error('No media found in message');
       }
 
-      const stream = await downloadContentFromMessage(
-        mediaMessage,
-        mediaType
-      )
+      // Robust download: rewrites dead payload hosts (a.whatsapp.net) to the
+      // socket's negotiated media_conn host and retries transient failures.
+      const buffer = await downloadMediaBuffer(mediaMessage, mediaType, safeMediaHost(context.socket));
 
-      let buffer = Buffer.from([])
-      for await (const chunk of stream) {
-        buffer = Buffer.concat([buffer, chunk])
-      }
-
-      if (!buffer) {
+      if (!buffer || buffer.length === 0) {
         await context.socket.sendMessage(context.fromJid, {
           text: '❌ Failed to download media',
         });

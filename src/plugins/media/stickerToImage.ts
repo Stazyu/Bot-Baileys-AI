@@ -1,5 +1,6 @@
 import type { CommandModule } from '../../types/index.js';
-import { downloadContentFromMessage, proto } from '@stazyu/baileys';
+import { proto } from '@stazyu/baileys';
+import { downloadMediaBuffer, safeMediaHost } from '../../utils/mediaDownload.js';
 
 const stickerToImageCommand: CommandModule = {
   config: {
@@ -50,17 +51,13 @@ const stickerToImageCommand: CommandModule = {
         throw new Error('No sticker found in message');
       }
 
-      const stream = await downloadContentFromMessage(
+      const buffer = await downloadMediaBuffer(
         stickerMessage,
-        'sticker'
+        'sticker',
+        safeMediaHost(context.socket),
       );
 
-      let buffer = Buffer.from([]);
-      for await (const chunk of stream) {
-        buffer = Buffer.concat([buffer, chunk]);
-      }
-
-      if (!buffer) {
+      if (!buffer || buffer.length === 0) {
         await context.socket.sendMessage(context.fromJid, {
           text: '❌ Failed to download sticker',
         });
