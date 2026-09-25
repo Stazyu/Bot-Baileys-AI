@@ -991,7 +991,11 @@ export class BotHandler {
       const errorMessage = errorText(error);
       let userFriendlyMessage: string;
 
-      if (errorMessage.includes('empty after all retries') || errorMessage.includes('empty response')) {
+      if (errorMessage.includes('ai_upstream_failed')) {
+        // Upstream provider failed after retries — the turn did not complete.
+        userFriendlyMessage = '❌ Layanan AI lagi error. Coba lagi bentar ya.';
+        log.error(`[${this.sessionId}] ❌ AI upstream failed (group):`, error as object);
+      } else if (errorMessage.includes('empty after all retries') || errorMessage.includes('empty response')) {
         userFriendlyMessage = '❌ Ga bisa jawab itu, coba kata-kata lain deh.';
         log.error(`[${this.sessionId}] ❌ AI empty response (group):`, error as object);
       } else if (errorMessage.includes('timeout') || errorMessage.includes('timedout') || errorMessage.includes('econnrefused')) {
@@ -1095,7 +1099,12 @@ export class BotHandler {
       const errorMessage = errorText(error);
       let userFriendlyMessage: string;
 
-      if (errorMessage.includes('empty after all retries') || errorMessage.includes('empty response')) {
+      if (errorMessage.includes('ai_upstream_failed')) {
+        // Upstream provider failed after retries (502/503/429/timeout). The turn
+        // genuinely did NOT complete — never claim it was processed.
+        userFriendlyMessage = '❌ Maaf, layanan AI sedang bermasalah. Silakan coba lagi nanti.';
+        log.error(`[${this.sessionId}] ❌ AI upstream failed:`, error as object);
+      } else if (errorMessage.includes('empty after all retries') || errorMessage.includes('empty response')) {
         userFriendlyMessage = '❌ Maaf, saat ini tidak dapat memproses permintaan yang diinginkan. Silakan coba lagi nanti.';
         log.error(`[${this.sessionId}] ❌ AI empty response:`, error as object);
       } else if (errorMessage.includes('timeout') || errorMessage.includes('timedout') || errorMessage.includes('econnrefused')) {

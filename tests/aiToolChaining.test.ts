@@ -42,28 +42,41 @@ test('chatWithTools supports sequential tool rounds before the final answer', as
     req.on('end', () => {
       requests.push(JSON.parse(body));
       const round = requests.length;
-      const message = round === 1
-        ? {
-            content: null,
-            tool_calls: [{
-              id: 'call_search',
-              type: 'function',
-              function: { name: 'test_search', arguments: '{"value":"latest news"}' },
-            }],
-          }
-        : round === 2
-          ? {
-              content: null,
-              tool_calls: [{
-                id: 'call_fetch',
-                type: 'function',
-                function: { name: 'test_fetch', arguments: '{"value":"https://example.com/news"}' },
-              }],
-            }
-          : { content: 'Jawaban berdasarkan artikel terverifikasi.' };
 
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ choices: [{ message }] }));
+      // The provider is asked for `stream: true`, so the mock must speak SSE.
+      // (It previously returned plain JSON, which the AI SDK could not parse —
+      // the stream yielded no text and the turn failed.)
+      const sse = (choices: unknown) => `data: ${JSON.stringify({ choices })}\n\n`;
+      const text = (content: string) =>
+        sse([{ index: 0, delta: { content }, finish_reason: null }]);
+      const toolCall = (id: string, name: string, args: object) =>
+        sse([
+          {
+            index: 0,
+            delta: {
+              role: 'assistant',
+              tool_calls: [
+                { index: 0, id, type: 'function', function: { name, arguments: JSON.stringify(args) } },
+              ],
+            },
+            finish_reason: null,
+          },
+        ]);
+      const finish = (reason: string) => sse([{ index: 0, delta: {}, finish_reason: reason }]);
+
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      if (round === 1) {
+        res.write(toolCall('call_search', 'test_search', { value: 'latest news' }));
+        res.write(finish('tool_calls'));
+      } else if (round === 2) {
+        res.write(toolCall('call_fetch', 'test_fetch', { value: 'https://example.com/news' }));
+        res.write(finish('tool_calls'));
+      } else {
+        res.write(text('Jawaban berdasarkan artikel terverifikasi.'));
+        res.write(finish('stop'));
+      }
+      res.write('data: [DONE]\n\n');
+      res.end();
     });
   });
 
