@@ -1,0 +1,95 @@
+import type { proto } from '@stazyu/baileys';
+import sharp from 'sharp';
+import { downloadMediaBuffer, safeMediaHost } from './mediaDownload.js';
+import { extractVisionImagePayload } from './messageHelper.js';
+import { log } from './logger.js';
+
+/**
+ * One image handed to a vision-capable model.
+ *
+ * Kept provider-agnostic on purpose: `aiService` turns this into an AI SDK
+ * `file` content part (OpenAI-compatible) or an Ollama `images` entry.
+ */
+export interface VisionImage {
+  /** IANA media type, e.g. `image/jpeg`. */
+  mediaType: string;
+  /** Normalized bytes ready for base64 encoding. */
+  data: Uint8Array;
+}
+
+/** Reject absurd payloads before downloading — real WA images are far below this. */
+const MAX_RAW_BYTES = 15 * 1024 * 1024;
+/** Downscale so the base64 payload stays small enough for every provider. */
+const MAX_DIMENSION = 1280;
+const JPEG_QUALITY = 80;
+
+/** Anything exposing `getMediaHost` (WASocket) is accepted. */
+type MediaHostSource = { getMediaHost?: () => string } | null | undefined;
+
+/** True when the message (or its quote) carries an image worth sending to the AI. */
+export function hasVisionImage(
+  content: proto.IMessage | null | undefined,
+): boolean {
+  return extractVisionImagePayload(content) !== null;
+}
+
+/**
+ * Download + normalize the image attached to a message (or the one it quotes).
+ *
+ * Never throws: a failed download/decode logs a warning and returns null so the
+ * caller can fall back to plain text handling.
+ */
+export async function extractVisionImage(
+  content: proto.IMessage | null | undefined,
+  socket?: MediaHostSource,
+): Promise<VisionImage | null> {
+  const source = extractVisionImagePayload(content);
+  if (!source) return null;
+
+  // Undownloadable payload (no key/path) — nothing we can fetch.
+  if (!source.mediaKey && !source.url && !source.directPath) {
+    log.warn('⚠️ [Vision] Image payload has no mediaKey/url/directPath — skipping');
+    return null;
+  }
+
+  const declared = Number(source.fileLength ?? 0);
+  if (Number.isFinite(declared) && declared > MAX_RAW_BYTES) {
+    log.warn(`⚠️ [Vision] Image too large (${declared} bytes) — skipping`);
+    return null;
+  }
+
+  try {
+    const raw = await downloadMediaBuffer(source, 'image', safeMediaHost(socket));
+    if (raw.length > MAX_RAW_BYTES) {
+      log.warn(`⚠️ [Vision] Downloaded image too large (${raw.length} bytes) — skipping`);
+      return null;
+    }
+    return await normalize(raw, source.mimetype);
+  } catch (error) {
+    log.warn(`⚠️ [Vision] Image load failed: ${(error as Error).message}`);
+    return null;
+  }
+}
+
+/**
+ * Recompress to a bounded JPEG (max 1280px, q80) so vision payloads stay small.
+ * Falls back to the raw bytes when sharp cannot process the input.
+ */
+async function normalize(raw: Buffer, mimetype?: string | null): Promise<VisionImage> {
+  try {
+    const { data } = await sharp(raw)
+      .rotate()
+      .resize({
+        width: MAX_DIMENSION,
+        height: MAX_DIMENSION,
+        fit: 'inside',
+        withoutEnlargement: true,
+      })
+      .jpeg({ quality: JPEG_QUALITY })
+      .toBuffer({ resolveWithObject: true });
+    return { mediaType: 'image/jpeg', data };
+  } catch (error) {
+    log.debug(`[Vision] Recompress skipped: ${(error as Error).message}`);
+    return { mediaType: mimetype || 'image/jpeg', data: new Uint8Array(raw) };
+  }
+}

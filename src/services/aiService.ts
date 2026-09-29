@@ -9,6 +9,7 @@ import {
   type ModelMessage,
 } from "ai";
 import toolRegistry from "../tools/toolRegistry.js";
+import type { VisionImage } from "../utils/vision.js";
 import type { ToolContext, ToolExecuteResult } from "../types/tools.js";
 import { persistToolCall } from "./toolLogService.js";
 import {
@@ -18,9 +19,32 @@ import {
 
 type Provider = "openai" | "openrouter" | "ollama" | "other";
 
+/** Text part of a multimodal user message. */
+interface TextPart {
+  type: "text";
+  text: string;
+}
+
+/**
+ * Inline image part of a user message.
+ *
+ * Deliberately the AI SDK's `file` part instead of the deprecated `image`
+ * part: the OpenAI-compatible provider only maps `text`/`file` parts onto
+ * OpenAI content parts, so an `image` part would serialize as `null` and
+ * corrupt the request body.
+ */
+interface ImagePart {
+  type: "file";
+  mediaType: string;
+  data: { type: "data"; data: Uint8Array };
+}
+
+/** Content shape of a user message carrying vision attachments. */
+type UserContentParts = Array<TextPart | ImagePart>;
+
 interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content: string | null;
+  content: string | UserContentParts | null;
   tool_calls?: unknown[];
   tool_call_id?: string;
 }
@@ -54,6 +78,16 @@ interface RetryErrorShape {
 }
 
 /**
+ * A provider failure after unwrapping: the AI SDK's retry wrapper, or the
+ * underlying provider/axios error it was hiding. Every field is optional
+ * because the original throwable is untyped at this boundary.
+ */
+export interface UnwrappedProviderError extends RetryErrorShape, UpstreamErrorShape {
+  isRetryable?: boolean;
+  code?: string;
+}
+
+/**
  * Unwrap `AI_RetryError` down to the underlying provider error.
  *
  * The AI SDK retries HTTP failures internally (`maxRetries`, default 2) and, on
@@ -61,17 +95,17 @@ interface RetryErrorShape {
  * the real status lives on `.lastError`. Without unwrapping, a 502/503/429 is
  * indistinguishable from an unclassified failure and gets treated as success.
  */
-export function unwrapProviderError(error: unknown): unknown {
+export function unwrapProviderError(error: unknown): UnwrappedProviderError {
   const err = (error ?? {}) as RetryErrorShape;
   if (err.name === "AI_RetryError" || err.lastError) {
-    return err.lastError ?? err.errors?.at(-1) ?? error;
+    return (err.lastError ?? err.errors?.at(-1) ?? error ?? {}) as UnwrappedProviderError;
   }
-  return error;
+  return (error ?? {}) as UnwrappedProviderError;
 }
 
 /** Best-effort extraction of the upstream provider's own error message. */
 export function extractUpstreamError(error: unknown): { message: string; code?: string; statusCode?: number } {
-  const err = (unwrapProviderError(error) ?? {}) as UpstreamErrorShape;
+  const err = unwrapProviderError(error);
   let message = err.message || "Failed to get AI response";
   let code = err.data?.error?.code ?? err.response?.data?.error?.code;
 
@@ -320,6 +354,37 @@ export class AIService {
     return stripToolCallArtifacts(content);
   }
 
+  /**
+   * Build the `content` of a user message, attaching vision images when present.
+   *
+   * Without images this stays a plain string — the fast path every existing
+   * conversation takes. With images it becomes AI SDK content parts. An empty
+   * text is allowed: the model still receives the image alone (image-only
+   * messages are a first-class input, not an error).
+   */
+  private buildUserContent(
+    userMessage: string,
+    images?: VisionImage[] | null,
+  ): string | UserContentParts {
+    if (!images || images.length === 0) {
+      return userMessage;
+    }
+
+    const parts: UserContentParts = [];
+    if (userMessage) {
+      parts.push({ type: "text", text: userMessage });
+    }
+    for (const image of images) {
+      parts.push({
+        type: "file",
+        mediaType: image.mediaType || "image/jpeg",
+        data: { type: "data", data: image.data },
+      });
+    }
+
+    return parts.length > 0 ? parts : userMessage;
+  }
+
   getProvider(): Provider {
     return this.provider;
   }
@@ -340,6 +405,7 @@ export class AIService {
     sessionId: string,
     userMessage: string,
     systemPrompt?: string,
+    images?: VisionImage[] | null,
   ): Promise<string> {
     if (!this.isConfigured()) {
       throw new Error(this.getNotConfiguredMessage());
@@ -351,7 +417,7 @@ export class AIService {
       this.upsertSystemPrompt(messages, systemPrompt);
     }
 
-    messages.push({ role: "user", content: userMessage });
+    messages.push({ role: "user", content: this.buildUserContent(userMessage, images) });
 
     if (this.provider === "ollama") {
       return this.callOllamaNonStream(sessionId, messages);
@@ -362,7 +428,10 @@ export class AIService {
 
       const result = await generateText({
         model,
-        messages: messages as ModelMessage[],
+        // SAFETY: ChatMessage roles/content are a strict subset of ModelMessage's
+        // — system/user/assistant entries only, with `file` parts shaped exactly
+        // like the AI SDK's FilePart. Tool-role messages never enter history.
+        messages: messages as unknown as ModelMessage[],
         allowSystemInMessages: true,
       });
 
@@ -394,6 +463,7 @@ export class AIService {
     userMessage: string,
     systemPrompt?: string,
     onChunk?: StreamCallback,
+    images?: VisionImage[] | null,
   ): Promise<string> {
     if (!this.isConfigured()) {
       throw new Error(this.getNotConfiguredMessage());
@@ -405,7 +475,7 @@ export class AIService {
       this.upsertSystemPrompt(messages, systemPrompt);
     }
 
-    messages.push({ role: "user", content: userMessage });
+    messages.push({ role: "user", content: this.buildUserContent(userMessage, images) });
 
     if (this.provider === "ollama") {
       return this.callOllamaStream(sessionId, messages, onChunk);
@@ -422,6 +492,7 @@ export class AIService {
     systemPrompt?: string,
     onChunk?: StreamCallback,
     toolContext?: ToolContext,
+    images?: VisionImage[] | null,
   ): Promise<string> {
     if (!this.isConfigured()) {
       throw new Error(this.getNotConfiguredMessage());
@@ -431,7 +502,7 @@ export class AIService {
       console.log(
         "[AIService] ⚠️ Provider does not support function calling. Falling back to regular chat.",
       );
-      return this.chatStream(sessionId, userMessage, systemPrompt, onChunk);
+      return this.chatStream(sessionId, userMessage, systemPrompt, onChunk, images);
     }
 
     const messages = this.getConversationHistory(sessionId);
@@ -440,7 +511,7 @@ export class AIService {
       this.upsertSystemPrompt(messages, systemPrompt);
     }
 
-    messages.push({ role: "user", content: userMessage });
+    messages.push({ role: "user", content: this.buildUserContent(userMessage, images) });
 
     const tools = toolRegistry.hasTools()
       ? this.buildAISDKTools(toolContext)
@@ -486,7 +557,9 @@ export class AIService {
 
         const result = streamText({
           model,
-          messages: messages as ModelMessage[],
+          // SAFETY: ChatMessage is our narrower mirror of ModelMessage (same
+          // roles, `file` parts = AI SDK FilePart); no tool-role messages are stored.
+          messages: messages as unknown as ModelMessage[],
           tools,
           stopWhen,
           allowSystemInMessages: true,
@@ -534,7 +607,11 @@ export class AIService {
           finishReason?: string;
         };
 
-        for await (const part of result.stream as unknown as AsyncIterable<FullStreamPart>) {
+        // SAFETY: `result.stream` is an untyped AsyncIterable at this version;
+        // FullStreamPart declares only the optional fields the switch below reads.
+        const streamParts = result.stream as unknown as AsyncIterable<FullStreamPart>;
+
+        for await (const part of streamParts) {
           switch (part.type) {
             case "start-step":
               stepText = "";
@@ -704,6 +781,37 @@ export class AIService {
   //  OLLAMA (raw axios — different API surface)
   // ────────────────────────────────────────────────────────────────
 
+  /**
+   * Ollama's `/api/chat` wants `content` as a plain string plus a separate
+   * base64 `images` array — it does not understand AI SDK content parts.
+   * Flattens vision messages accordingly and leaves plain text untouched.
+   */
+  private toOllamaMessages(
+    messages: ChatMessage[],
+  ): Array<{ role: string; content: string; images?: string[] }> {
+    return messages.map((message) => {
+      if (!Array.isArray(message.content)) {
+        return { role: message.role, content: message.content ?? "" };
+      }
+
+      const texts: string[] = [];
+      const images: string[] = [];
+      for (const part of message.content) {
+        if (part.type === "text") {
+          texts.push(part.text);
+        } else if (part.type === "file" && part.data.type === "data") {
+          images.push(Buffer.from(part.data.data).toString("base64"));
+        }
+      }
+
+      return {
+        role: message.role,
+        content: texts.join("\n"),
+        ...(images.length > 0 ? { images } : {}),
+      };
+    });
+  }
+
   private async callOllamaNonStream(
     sessionId: string,
     messages: ChatMessage[],
@@ -711,7 +819,7 @@ export class AIService {
     try {
       const response = await axios.post<{ message?: { content?: string } }>(
         `${this.baseUrl}/api/chat`,
-        { model: this.model, messages, stream: false },
+        { model: this.model, messages: this.toOllamaMessages(messages), stream: false },
         {
           headers: { "Content-Type": "application/json" },
           timeout: 60000,
@@ -743,7 +851,7 @@ export class AIService {
     try {
       const response = await axios.post(
         `${this.baseUrl}/api/chat`,
-        { model: this.model, messages, stream: true },
+        { model: this.model, messages: this.toOllamaMessages(messages), stream: true },
         {
           headers: { "Content-Type": "application/json" },
           timeout: 120000,
@@ -888,7 +996,48 @@ export class AIService {
     const ttl = this.isGroupSession(sessionId)
       ? this.GROUP_TTL_SEC
       : this.PRIVATE_TTL_SEC;
-    this.conversationCache.set(sessionId, messages, ttl);
+    this.conversationCache.set(sessionId, this.pruneVisionHistory(messages), ttl);
+  }
+
+  /**
+   * Keep at most ONE image attachment in cached history — the most recent one.
+   *
+   * Base64 vision payloads are hundreds of KB each; retaining every image a
+   * conversation ever sent would bloat a cache that holds up to 1000 keys for
+   * up to an hour. Older images are dropped to their surrounding text, which is
+   * exactly what the model would remember about them anyway.
+   */
+  private pruneVisionHistory(messages: ChatMessage[]): ChatMessage[] {
+    let lastImageIndex = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
+      if (
+        Array.isArray(message.content) &&
+        message.content.some((part) => part.type === "file")
+      ) {
+        lastImageIndex = i;
+        break;
+      }
+    }
+
+    if (lastImageIndex === -1) {
+      return messages;
+    }
+
+    return messages.map((message, index) => {
+      if (index === lastImageIndex || !Array.isArray(message.content)) {
+        return message;
+      }
+      if (!message.content.some((part) => part.type === "file")) {
+        return message;
+      }
+
+      const texts: string[] = [];
+      for (const part of message.content) {
+        if (part.type === "text") texts.push(part.text);
+      }
+      return { ...message, content: texts.length > 0 ? texts.join("\n") : "" };
+    });
   }
 
   /**

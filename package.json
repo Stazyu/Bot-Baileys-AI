@@ -17,6 +17,7 @@
     "test:aiToolChaining": "tsx --test tests/aiToolChaining.test.ts",
     "test:rateLimiter": "tsx --test tests/rateLimiter.test.ts",
     "test:messageValidator": "tsx --test tests/messageValidator.test.ts",
+    "test:vision": "tsx --test tests/visionPayload.test.ts",
     "test:youtubeSearch": "tsx --test tests/youtubeSearchMatch.test.ts",
     "test:mediaDownload": "tsx --test tests/mediaDownload.test.ts",
     "test:aiStreamErrors": "tsx --test tests/aiStreamErrors.test.ts",

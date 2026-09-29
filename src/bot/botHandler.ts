@@ -25,6 +25,7 @@ import {
   extractInteractiveButtonId,
   type MessageType,
 } from '../utils/messageHelper.js';
+import { extractVisionImage, hasVisionImage, type VisionImage } from '../utils/vision.js';
 moment.locale('jv');
 
 // Color utility for console output
@@ -716,7 +717,8 @@ export class BotHandler {
           const targetUserId = user_id || simplified.from || '';
           // Dua lapis: sync cache (no overhead) || async DB fallback (cold cache)
           const aiEnabled = isAIModeEnabled(targetUserId) || await isAIModeEnabledAsync(targetUserId);
-          if (aiEnabled && body) {
+          // Vision: an image with (or without) a caption is a valid AI request.
+          if (aiEnabled && (body || hasVisionImage(message.message))) {
             // ── Daily limit: private AI ──────────────────────────────
             if (user_id && !isOwner(user_id) && premiumService.isPrivateAiLimitEnabled()) {
               const privateAiCheck = await premiumService.checkPrivateAiLimit(user_id);
@@ -900,12 +902,27 @@ export class BotHandler {
     }
   }
 
+  /**
+   * Load the image attached to a message (or the one it quotes) for AI vision.
+   *
+   * Returns null when there is none or it could not be downloaded, so callers
+   * simply fall back to plain-text handling.
+   */
+  private async collectVision(message: WAMessage): Promise<VisionImage[] | null> {
+    const image = await extractVisionImage(message?.message, this.socket);
+    return image ? [image] : null;
+  }
+
   private async handleGroupAutoReply(simplified: SimplifiedMessage, to: string, originalMessage: WAMessage): Promise<void> {
     try {
       let message = simplified.message || simplified.body || '';
 
+      // Vision: the message may be an image (or an image it replies to) with no
+      // text at all — that is still something the AI should answer.
+      const visionImages = await this.collectVision(originalMessage);
+
       // Validate that there's actual content to reply to
-      if (!message || message.trim().length === 0) {
+      if ((!message || message.trim().length === 0) && !visionImages) {
         return;
       }
 
@@ -955,6 +972,7 @@ export class BotHandler {
           }
         },
         toolContext,
+        visionImages,
       );
 
       await this.socket.sendPresenceUpdate('paused', to).catch(() => {});
@@ -1022,8 +1040,11 @@ export class BotHandler {
     try {
       const userId = simplified.user_id || to;
 
+      // Vision: an image-only message (no caption) is a valid AI request.
+      const visionImages = await this.collectVision(originalMessage);
+
       // Validate message content
-      if (!message || message.trim().length === 0) {
+      if ((!message || message.trim().length === 0) && !visionImages) {
         return;
       }
 
@@ -1063,6 +1084,7 @@ export class BotHandler {
           }
         },
         toolContext,
+        visionImages,
       );
 
       await this.socket.sendPresenceUpdate('paused', to).catch(() => {});
