@@ -22,7 +22,7 @@
 ## 📋 Phase 2: Feature Enhancements
 
 ### AI & Chat
-- [ ] **AI Image Analysis** — Kirim gambar ke AI untuk dianalisis (vision)
+- [x] **AI Image Analysis** — Kirim gambar ke AI untuk dianalisis (vision)
 - [ ] **AI Voice Notes** — Transcribe dan proses voice notes dengan AI
 - [ ] **Custom System Prompt per User** — User bisa set system prompt sendiri
 - [ ] **AI Personality Presets** — Multiple personality templates

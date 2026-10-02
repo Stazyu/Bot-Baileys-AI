@@ -1,5 +1,5 @@
 import { log } from './logger.js';
-import { extractTextFromMessage } from './messageHelper.js';
+import { extractTextFromMessage, extractVisionImagePayload } from './messageHelper.js';
 import type { proto } from '@stazyu/baileys';
 export interface ValidationResult {
   valid: boolean;
@@ -132,7 +132,11 @@ export function validateMessage(
   const body = extractMessageBody(msg.message);
   if (body !== null) {
     if (body.length === 0) {
-      return { valid: false, reason: 'Message body is empty', code: 'EMPTY_BODY' };
+      // Vision: an image with an empty caption is a meaningful message (the AI
+      // reads the picture) — only reject a truly empty TEXT payload.
+      if (!extractVisionImagePayload(msg.message)) {
+        return { valid: false, reason: 'Message body is empty', code: 'EMPTY_BODY' };
+      }
     }
     if (body.length > opts.maxBodyLength) {
       return {

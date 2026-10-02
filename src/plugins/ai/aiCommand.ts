@@ -1,10 +1,10 @@
-import type { WASocket } from "@stazyu/baileys";
 import type { CommandModule } from "../../types/index.js";
 import type { ToolContext } from "../../types/tools.js";
 import aiService, { AIService } from "../../services/aiService.js";
 import { isOwner } from "../../config/botConfig.js";
 import { getSystemPrompt } from "../../services/systemPrompt.js";
 import { stripToolCallArtifacts } from "../../utils/toolCallFilter.js";
+import { extractVisionImage } from "../../utils/vision.js";
 import {
   isAIModeEnabledSync,
   setAIModeEnabled,
@@ -113,13 +113,18 @@ const AICommand: CommandModule = {
 
     const question = args.join(" ");
 
-    if (!question) {
+    // Vision: `!ai` as a reply to an image (or with an attached image) sends
+    // the picture along with the question.
+    const visionImage = await extractVisionImage(context.message?.message, context.socket);
+
+    if (!question && !visionImage) {
       await context.socket.sendMessage(context.fromJid, {
         text: `📖 *Cara Penggunaan AI:*
 
 • ${context.simplified?.prefix || "!"}ai on - Aktifkan mode AI
 • ${context.simplified?.prefix || "!"}ai off - Nonaktifkan mode AI
 • ${context.simplified?.prefix || "!"}ai <pertanyaan> - Tanya AI langsung
+• Balas gambar dengan ${context.simplified?.prefix || "!"}ai <pertanyaan> - AI bisa lihat gambarnya (vision)
 • ${context.simplified?.prefix || "!"}ai clear - Bersihkan percakapan
 ${isOwner(userId) ? `• ${context.simplified?.prefix || "!"}ai model <nama model> - Ganti model AI (hanya owner)` : ""}
 
@@ -154,6 +159,7 @@ ${isOwner(userId) ? `• ${context.simplified?.prefix || "!"}ai model <nama mode
           }
         },
         toolContext,
+        visionImage ? [visionImage] : undefined,
       );
 
       await context.socket.sendPresenceUpdate("paused", context.fromJid);
@@ -182,7 +188,7 @@ export function isAIModeEnabled(userId: string): boolean {
   return isAIModeEnabledSync(userId);
 }
 
-export function getAIMode(userId: string): "single" | "chat" {
+export function getAIMode(_userId: string): "single" | "chat" {
   return "chat";
 }
 

@@ -56,6 +56,30 @@ test('rejects empty text bodies', () => {
   assert.equal(result.code, 'EMPTY_BODY');
 });
 
+test('accepts an image with an empty caption (vision input)', () => {
+  const result = validateMessage(
+    baseMessage({ message: { imageMessage: { caption: '', mediaKey: new Uint8Array([1]) } } }),
+  );
+  assert.equal(result.valid, true);
+});
+
+test('accepts an empty-text reply that quotes an image (vision input)', () => {
+  const result = validateMessage(
+    baseMessage({
+      message: {
+        conversation: '',
+        extendedTextMessage: {
+          text: '',
+          contextInfo: {
+            quotedMessage: { imageMessage: { mediaKey: new Uint8Array([1]) } },
+          },
+        },
+      },
+    }),
+  );
+  assert.equal(result.valid, true);
+});
+
 test('rejects bodies over maxBodyLength', () => {
   const result = validateMessage(
     baseMessage({ message: { conversation: 'a'.repeat(20) } }),

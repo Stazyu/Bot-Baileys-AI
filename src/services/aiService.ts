@@ -9,6 +9,7 @@ import {
   type ModelMessage,
 } from "ai";
 import toolRegistry from "../tools/toolRegistry.js";
+import type { VisionImage } from "../utils/vision.js";
 import type { ToolContext, ToolExecuteResult } from "../types/tools.js";
 import { persistToolCall } from "./toolLogService.js";
 import {
@@ -18,9 +19,32 @@ import {
 
 type Provider = "openai" | "openrouter" | "ollama" | "other";
 
+/** Text part of a multimodal user message. */
+interface TextPart {
+  type: "text";
+  text: string;
+}
+
+/**
+ * Inline image part of a user message.
+ *
+ * Deliberately the AI SDK's `file` part instead of the deprecated `image`
+ * part: the OpenAI-compatible provider only maps `text`/`file` parts onto
+ * OpenAI content parts, so an `image` part would serialize as `null` and
+ * corrupt the request body.
+ */
+interface ImagePart {
+  type: "file";
+  mediaType: string;
+  data: { type: "data"; data: Uint8Array };
+}
+
+/** Content shape of a user message carrying vision attachments. */
+type UserContentParts = Array<TextPart | ImagePart>;
+
 interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content: string | null;
+  content: string | UserContentParts | null;
   tool_calls?: unknown[];
   tool_call_id?: string;
 }
@@ -36,6 +60,108 @@ type StreamCallback = (chunk: StreamChunk) => void | Promise<void>;
 
 const MALFORMED_TOOL_CALL_FALLBACK =
   "Maaf, pencarian gagal diproses. Silakan coba lagi sebentar.";
+
+/** Shape shared by AI SDK `APICallError` and plain axios-style errors. */
+interface UpstreamErrorShape {
+  message?: string;
+  statusCode?: number;
+  responseBody?: string;
+  data?: { error?: { message?: string; code?: string } };
+  response?: { data?: { error?: { message?: string; code?: string } } };
+}
+
+/** Shape of the AI SDK's `AI_RetryError`, which wraps the real provider error. */
+interface RetryErrorShape {
+  name?: string;
+  lastError?: unknown;
+  errors?: unknown[];
+}
+
+/**
+ * A provider failure after unwrapping: the AI SDK's retry wrapper, or the
+ * underlying provider/axios error it was hiding. Every field is optional
+ * because the original throwable is untyped at this boundary.
+ */
+export interface UnwrappedProviderError extends RetryErrorShape, UpstreamErrorShape {
+  isRetryable?: boolean;
+  code?: string;
+}
+
+/**
+ * Unwrap `AI_RetryError` down to the underlying provider error.
+ *
+ * The AI SDK retries HTTP failures internally (`maxRetries`, default 2) and, on
+ * final failure, yields an `AI_RetryError` whose own `statusCode` is undefined —
+ * the real status lives on `.lastError`. Without unwrapping, a 502/503/429 is
+ * indistinguishable from an unclassified failure and gets treated as success.
+ */
+export function unwrapProviderError(error: unknown): UnwrappedProviderError {
+  const err = (error ?? {}) as RetryErrorShape;
+  if (err.name === "AI_RetryError" || err.lastError) {
+    return (err.lastError ?? err.errors?.at(-1) ?? error ?? {}) as UnwrappedProviderError;
+  }
+  return (error ?? {}) as UnwrappedProviderError;
+}
+
+/** Best-effort extraction of the upstream provider's own error message. */
+export function extractUpstreamError(error: unknown): { message: string; code?: string; statusCode?: number } {
+  const err = unwrapProviderError(error);
+  let message = err.message || "Failed to get AI response";
+  let code = err.data?.error?.code ?? err.response?.data?.error?.code;
+
+  // AI SDK puts the raw body on `responseBody` as a JSON string.
+  if (typeof err.responseBody === "string" && err.responseBody.trim()) {
+    try {
+      const parsed = JSON.parse(err.responseBody) as { error?: { message?: string; code?: string } };
+      if (parsed.error?.message) message = parsed.error.message;
+      if (parsed.error?.code) code = parsed.error.code;
+    } catch {
+      // Not JSON — fall through to the structured fields / raw message.
+    }
+  }
+
+  const structured = err.data?.error?.message ?? err.response?.data?.error?.message;
+  if (structured) message = structured;
+
+  return { message, code, statusCode: err.statusCode };
+}
+
+/** Upstream status codes worth retrying at the AIService level. */
+const RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504, 522, 524]);
+
+/**
+ * Classify a provider failure: retryable (transient upstream/network) vs
+ * terminal (bad request, auth, expired media).
+ *
+ * Reads the unwrapped provider error so `AI_RetryError` wrappers report the
+ * real status code instead of `undefined`.
+ */
+export function isRetryableProviderError(error: unknown): boolean {
+  const raw = unwrapProviderError(error) as { isRetryable?: boolean; code?: string };
+  const { statusCode } = extractUpstreamError(error);
+
+  // Explicit signal from the AI SDK is authoritative.
+  if (raw?.isRetryable === true) return true;
+  if (statusCode !== undefined && RETRYABLE_STATUS.has(statusCode)) return true;
+  // 4xx that are not in the retryable set (400/401/403/404/422…) are terminal.
+  if (statusCode !== undefined && statusCode >= 400 && statusCode < 500) return false;
+
+  const code = String(raw?.code ?? "");
+  if (/ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|EPIPE|UND_ERR|socket hang up/i.test(code)) {
+    return true;
+  }
+
+  const { message } = extractUpstreamError(error);
+  return /timeout|timed out|econnreset|econnrefused|socket hang up|network|fetch failed|bad gateway|gateway timeout|service unavailable|too many requests|rate limit|overloaded/i.test(
+    message,
+  );
+}
+
+/**
+ * Raised when every streaming attempt failed, so the turn genuinely did NOT
+ * complete. Callers match on this prefix to avoid replying as if it succeeded.
+ */
+export const AI_UPSTREAM_FAILED_PREFIX = "AI_UPSTREAM_FAILED: ";
 // Tool-calling budget. Keep room beyond the expected tool calls so the model
 // still has steps to write its final answer — burning every step on tool calls
 // (e.g. 1 web_search + 2-3 web_fetch) yields empty final text.
@@ -228,6 +354,37 @@ export class AIService {
     return stripToolCallArtifacts(content);
   }
 
+  /**
+   * Build the `content` of a user message, attaching vision images when present.
+   *
+   * Without images this stays a plain string — the fast path every existing
+   * conversation takes. With images it becomes AI SDK content parts. An empty
+   * text is allowed: the model still receives the image alone (image-only
+   * messages are a first-class input, not an error).
+   */
+  private buildUserContent(
+    userMessage: string,
+    images?: VisionImage[] | null,
+  ): string | UserContentParts {
+    if (!images || images.length === 0) {
+      return userMessage;
+    }
+
+    const parts: UserContentParts = [];
+    if (userMessage) {
+      parts.push({ type: "text", text: userMessage });
+    }
+    for (const image of images) {
+      parts.push({
+        type: "file",
+        mediaType: image.mediaType || "image/jpeg",
+        data: { type: "data", data: image.data },
+      });
+    }
+
+    return parts.length > 0 ? parts : userMessage;
+  }
+
   getProvider(): Provider {
     return this.provider;
   }
@@ -248,6 +405,7 @@ export class AIService {
     sessionId: string,
     userMessage: string,
     systemPrompt?: string,
+    images?: VisionImage[] | null,
   ): Promise<string> {
     if (!this.isConfigured()) {
       throw new Error(this.getNotConfiguredMessage());
@@ -259,7 +417,7 @@ export class AIService {
       this.upsertSystemPrompt(messages, systemPrompt);
     }
 
-    messages.push({ role: "user", content: userMessage });
+    messages.push({ role: "user", content: this.buildUserContent(userMessage, images) });
 
     if (this.provider === "ollama") {
       return this.callOllamaNonStream(sessionId, messages);
@@ -270,7 +428,10 @@ export class AIService {
 
       const result = await generateText({
         model,
-        messages: messages as ModelMessage[],
+        // SAFETY: ChatMessage roles/content are a strict subset of ModelMessage's
+        // — system/user/assistant entries only, with `file` parts shaped exactly
+        // like the AI SDK's FilePart. Tool-role messages never enter history.
+        messages: messages as unknown as ModelMessage[],
         allowSystemInMessages: true,
       });
 
@@ -302,6 +463,7 @@ export class AIService {
     userMessage: string,
     systemPrompt?: string,
     onChunk?: StreamCallback,
+    images?: VisionImage[] | null,
   ): Promise<string> {
     if (!this.isConfigured()) {
       throw new Error(this.getNotConfiguredMessage());
@@ -313,7 +475,7 @@ export class AIService {
       this.upsertSystemPrompt(messages, systemPrompt);
     }
 
-    messages.push({ role: "user", content: userMessage });
+    messages.push({ role: "user", content: this.buildUserContent(userMessage, images) });
 
     if (this.provider === "ollama") {
       return this.callOllamaStream(sessionId, messages, onChunk);
@@ -330,6 +492,7 @@ export class AIService {
     systemPrompt?: string,
     onChunk?: StreamCallback,
     toolContext?: ToolContext,
+    images?: VisionImage[] | null,
   ): Promise<string> {
     if (!this.isConfigured()) {
       throw new Error(this.getNotConfiguredMessage());
@@ -339,7 +502,7 @@ export class AIService {
       console.log(
         "[AIService] ⚠️ Provider does not support function calling. Falling back to regular chat.",
       );
-      return this.chatStream(sessionId, userMessage, systemPrompt, onChunk);
+      return this.chatStream(sessionId, userMessage, systemPrompt, onChunk, images);
     }
 
     const messages = this.getConversationHistory(sessionId);
@@ -348,7 +511,7 @@ export class AIService {
       this.upsertSystemPrompt(messages, systemPrompt);
     }
 
-    messages.push({ role: "user", content: userMessage });
+    messages.push({ role: "user", content: this.buildUserContent(userMessage, images) });
 
     const tools = toolRegistry.hasTools()
       ? this.buildAISDKTools(toolContext)
@@ -394,7 +557,9 @@ export class AIService {
 
         const result = streamText({
           model,
-          messages: messages as ModelMessage[],
+          // SAFETY: ChatMessage is our narrower mirror of ModelMessage (same
+          // roles, `file` parts = AI SDK FilePart); no tool-role messages are stored.
+          messages: messages as unknown as ModelMessage[],
           tools,
           stopWhen,
           allowSystemInMessages: true,
@@ -419,10 +584,34 @@ export class AIService {
         let stepText = "";
         let finalText = "";
         let ackSent = false;
+        /** Set when the stream reports a failure — suppresses the success reply. */
+        let streamError: unknown;
+        let sawFinish = false;
+        /** True only when a tool actually completed — gates the tool-success fallback. */
+        let toolExecuted = false;
+        /**
+         * Tool failures are recorded but NOT fatal: the AI SDK feeds the error
+         * back to the model, which usually recovers and answers in a later step
+         * (verified: `tool-error` is followed by more steps and a normal
+         * `finish`). Only used as a last resort when the turn produced no text
+         * AND no successful tool ran, so a real failure is never reported as
+         * success.
+         */
+        let toolFailed = false;
 
-        type FullStreamPart = { type: string; text?: string; delta?: string };
+        type FullStreamPart = {
+          type: string;
+          text?: string;
+          delta?: string;
+          error?: unknown;
+          finishReason?: string;
+        };
 
-        for await (const part of result.stream as unknown as AsyncIterable<FullStreamPart>) {
+        // SAFETY: `result.stream` is an untyped AsyncIterable at this version;
+        // FullStreamPart declares only the optional fields the switch below reads.
+        const streamParts = result.stream as unknown as AsyncIterable<FullStreamPart>;
+
+        for await (const part of streamParts) {
           switch (part.type) {
             case "start-step":
               stepText = "";
@@ -446,9 +635,47 @@ export class AIService {
               }
               stepText = "";
               break;
+            // A failed stream step (502/503/429/network drop mid-flight). The
+            // SDK reports it as a stream part instead of throwing, so without
+            // this the turn would look like an empty-but-successful response.
+            case "error":
+              streamError = part.error;
+              break;
+            // A tool that ran and returned. Only this justifies the neutral
+            // "already processed" fallback when the model then says nothing.
+            case "tool-result":
+              toolExecuted = true;
+              break;
+            // A tool that failed. Not immediately fatal — the model gets the
+            // error and may still recover with a normal answer in a later step.
+            case "tool-error":
+              toolFailed = true;
+              break;
+            case "abort":
+              streamError = streamError ?? new Error("Stream aborted before completion");
+              break;
+            case "finish":
+              sawFinish = true;
+              // A finish reason of 'error' also means the step failed.
+              if (part.finishReason === "error") {
+                streamError = streamError ?? new Error("Model reported finishReason=error");
+              }
+              break;
             default:
               break;
           }
+        }
+
+        // Surface the failure (after the loop, so the stream is fully drained)
+        // instead of falling through to the tool-success fallback below.
+        if (streamError) {
+          throw streamError;
+        }
+
+        // No `finish` part at all means the stream ended abruptly (connection
+        // reset), which must not be mistaken for a completed response.
+        if (!sawFinish) {
+          throw new Error("AI stream ended before completion (no finish event)");
         }
 
         finalText = stepText;
@@ -472,16 +699,16 @@ export class AIService {
           return cleaned;
         }
 
+        // Tools were OFFERED but the model produced no text and never ran one.
+        // That is an empty response, not a success — only a tool that actually
+        // executed (and may have sent its media directly) earns the neutral
+        // "already processed" reply.
         const hadTools = !!tools && Object.keys(tools).length > 0;
         // NEVER retry an empty response when tools were involved: the AI SDK
-        // already ran the full tool-calling loop internally (via stopWhen). A retry
-        // here re-sends the same user message and re-executes the same tools,
-        // which caused duplicate downloads / repeated tool calls.
-        //
-        // Some providers/models return NO final text after executing a tool
-        // (e.g. the media was already sent directly by the tool). That must
-        // not surface as an error — fall back to a neutral verification reply.
-        if (hadTools) {
+        // already ran the full tool-calling loop internally (via stopWhen). A
+        // retry here re-sends the same user message and re-executes the same
+        // tools, which caused duplicate downloads / repeated tool calls.
+        if (toolExecuted) {
           const fallback = "Udah diproses, cek chat ya.";
           // Emit via callback too — callers collect the response from onChunk,
           // not from the return value. Otherwise the caller sees an empty
@@ -493,6 +720,21 @@ export class AIService {
           messages.push({ role: "assistant", content: fallback });
           this.setConversation(sessionId, messages);
           return fallback;
+        }
+
+        if (hadTools) {
+          console.warn(
+            "[AIService] ⚠️ Tools were available but none executed and no text was returned.",
+            { toolFailed },
+          );
+        }
+
+        // A tool ran and failed, the model said nothing, and no successful tool
+        // produced output. Reporting "already processed" here would be a lie.
+        if (toolFailed) {
+          throw new Error(
+            `${AI_UPSTREAM_FAILED_PREFIX}tool execution failed and the model returned no answer`,
+          );
         }
 
         // No tools: retry empty responses up to MAX_EMPTY_RETRIES.
@@ -507,46 +749,28 @@ export class AIService {
           "AI response empty after all retries (model returned no text content).",
         );
       } catch (error: unknown) {
-        const err = error as Error & {
-          response?: { data?: { error?: { message?: string } } };
-        };
+        const upstream = extractUpstreamError(error);
 
-        // If it's not the last attempt, retry on transient errors
-        if (attempt < MAX_EMPTY_RETRIES) {
-          const msg = (err.message || "").toLowerCase();
-          const isTransient =
-            msg.includes("timeout") ||
-            msg.includes("econnrefused") ||
-            msg.includes("econnreset") ||
-            msg.includes("429") ||
-            msg.includes("rate limit") ||
-            msg.includes("too many") ||
-            msg.includes("server error") ||
-            msg.includes("503") ||
-            msg.includes("502");
-
-          if (isTransient) {
-            console.warn(
-              `[AIService] ⚠️ Transient error on attempt ${attempt + 1} (${err.message}). Retrying...`,
-            );
-            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
-            continue;
-          }
+        // Retry transient upstream/network failures (502/503/429/timeout…).
+        // This reads the unwrapped provider error, so an AI_RetryError wrapper
+        // still reports its real status code instead of looking unclassified.
+        if (attempt < MAX_EMPTY_RETRIES && isRetryableProviderError(error)) {
+          console.warn(
+            `[AIService] ⚠️ Transient error on attempt ${attempt + 1}/${MAX_EMPTY_RETRIES + 1} ` +
+              `(${upstream.statusCode ?? upstream.message}). Retrying...`,
+          );
+          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+          continue;
         }
 
-        console.error(
-          `[AIService] ${this.provider} API Error:`,
-          (err as unknown as Record<string, unknown>).response
-            ? (err as unknown as { response?: { data?: unknown } }).response
-                ?.data
-            : err.message,
-        );
-        throw new Error(
-          (err as { response?: { data?: { error?: { message?: string } } } })
-            .response?.data?.error?.message ||
-            err.message ||
-            "Failed to get AI response",
-        );
+        console.error(`[AIService] ${this.provider} API Error:`, {
+          statusCode: upstream.statusCode,
+          message: upstream.message,
+        });
+
+        // Tag upstream failures so callers can show an accurate "temporarily
+        // unavailable" message instead of reporting success.
+        throw new Error(`${AI_UPSTREAM_FAILED_PREFIX}${upstream.message}`);
       }
     }
 
@@ -557,6 +781,37 @@ export class AIService {
   //  OLLAMA (raw axios — different API surface)
   // ────────────────────────────────────────────────────────────────
 
+  /**
+   * Ollama's `/api/chat` wants `content` as a plain string plus a separate
+   * base64 `images` array — it does not understand AI SDK content parts.
+   * Flattens vision messages accordingly and leaves plain text untouched.
+   */
+  private toOllamaMessages(
+    messages: ChatMessage[],
+  ): Array<{ role: string; content: string; images?: string[] }> {
+    return messages.map((message) => {
+      if (!Array.isArray(message.content)) {
+        return { role: message.role, content: message.content ?? "" };
+      }
+
+      const texts: string[] = [];
+      const images: string[] = [];
+      for (const part of message.content) {
+        if (part.type === "text") {
+          texts.push(part.text);
+        } else if (part.type === "file" && part.data.type === "data") {
+          images.push(Buffer.from(part.data.data).toString("base64"));
+        }
+      }
+
+      return {
+        role: message.role,
+        content: texts.join("\n"),
+        ...(images.length > 0 ? { images } : {}),
+      };
+    });
+  }
+
   private async callOllamaNonStream(
     sessionId: string,
     messages: ChatMessage[],
@@ -564,7 +819,7 @@ export class AIService {
     try {
       const response = await axios.post<{ message?: { content?: string } }>(
         `${this.baseUrl}/api/chat`,
-        { model: this.model, messages, stream: false },
+        { model: this.model, messages: this.toOllamaMessages(messages), stream: false },
         {
           headers: { "Content-Type": "application/json" },
           timeout: 60000,
@@ -596,7 +851,7 @@ export class AIService {
     try {
       const response = await axios.post(
         `${this.baseUrl}/api/chat`,
-        { model: this.model, messages, stream: true },
+        { model: this.model, messages: this.toOllamaMessages(messages), stream: true },
         {
           headers: { "Content-Type": "application/json" },
           timeout: 120000,
@@ -741,7 +996,48 @@ export class AIService {
     const ttl = this.isGroupSession(sessionId)
       ? this.GROUP_TTL_SEC
       : this.PRIVATE_TTL_SEC;
-    this.conversationCache.set(sessionId, messages, ttl);
+    this.conversationCache.set(sessionId, this.pruneVisionHistory(messages), ttl);
+  }
+
+  /**
+   * Keep at most ONE image attachment in cached history — the most recent one.
+   *
+   * Base64 vision payloads are hundreds of KB each; retaining every image a
+   * conversation ever sent would bloat a cache that holds up to 1000 keys for
+   * up to an hour. Older images are dropped to their surrounding text, which is
+   * exactly what the model would remember about them anyway.
+   */
+  private pruneVisionHistory(messages: ChatMessage[]): ChatMessage[] {
+    let lastImageIndex = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
+      if (
+        Array.isArray(message.content) &&
+        message.content.some((part) => part.type === "file")
+      ) {
+        lastImageIndex = i;
+        break;
+      }
+    }
+
+    if (lastImageIndex === -1) {
+      return messages;
+    }
+
+    return messages.map((message, index) => {
+      if (index === lastImageIndex || !Array.isArray(message.content)) {
+        return message;
+      }
+      if (!message.content.some((part) => part.type === "file")) {
+        return message;
+      }
+
+      const texts: string[] = [];
+      for (const part of message.content) {
+        if (part.type === "text") texts.push(part.text);
+      }
+      return { ...message, content: texts.length > 0 ? texts.join("\n") : "" };
+    });
   }
 
   /**

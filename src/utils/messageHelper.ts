@@ -280,3 +280,30 @@ export function extractContextInfo(content: proto.IMessage | null | undefined): 
 
   return undefined;
 }
+
+/**
+ * Downloadable image payload for AI vision input: the message's own image, or
+ * the image it replies to (so "apa ini?" over a quoted photo works too).
+ *
+ * Pure payload inspection — no download, no I/O. Returns null when neither the
+ * message nor its quote carries an image.
+ */
+export function extractVisionImagePayload(
+  content: proto.IMessage | null | undefined,
+): proto.Message.IImageMessage | null {
+  const m = unwrapMessage(content);
+  if (!m) {
+    return null;
+  }
+
+  if (m.imageMessage) {
+    return m.imageMessage;
+  }
+
+  const quoted = extractContextInfo(m)?.quotedMessage;
+  if (quoted?.imageMessage) {
+    return quoted.imageMessage;
+  }
+
+  return null;
+}
