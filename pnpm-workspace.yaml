@@ -1,3 +1,5 @@
+overrides:
+  sharp: ^0.35.3
 allowBuilds:
   '@prisma/client': true
   '@prisma/engines': true

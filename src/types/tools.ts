@@ -53,7 +53,7 @@ export interface AIToolResult {
 export interface ToolExecuteResult {
   success: boolean;
   message: string;
-  data?: any;
+  data?: unknown;
 }
 
 /**
@@ -67,16 +67,22 @@ export interface ToolContext {
   waSessionId?: string;
   /** User pemicu turn AI (JID). */
   userId?: string;
+  /** Caller LID if triggered from a group message with LID addressing mode */
+  callerLid?: string;
   pushName?: string;
   /** The raw user message that triggered this AI turn (used for intent fallback). */
   userMessage?: string;
+  /** Mentioned JIDs/LIDs in the triggering message */
+  mentions?: string[];
+  /** Quoted participant JID/LID in the triggering message */
+  quotedParticipant?: string;
 }
 
 /**
  * The function signature for executing a tool.
  */
 export type ToolExecuteFunction = (
-  args: Record<string, any>,
+  args: Record<string, unknown>,
   context: ToolContext
 ) => Promise<ToolExecuteResult>;
 

@@ -1,4 +1,4 @@
-import type { AIToolDefinition, ToolRegistryEntry, ToolExecuteFunction, ToolExecuteResult, ToolContext, AIToolCall, AIToolResult } from '../types/tools.js';
+import type { AIToolDefinition, ToolRegistryEntry, ToolExecuteFunction, ToolContext, AIToolCall, AIToolResult } from '../types/tools.js';
 
 /**
  * Central registry for all AI-callable tools.
@@ -94,10 +94,10 @@ export class ToolRegistry {
       };
     }
 
-    let parsedArgs: Record<string, any> = {};
+    let parsedArgs: Record<string, unknown> = {};
     try {
       parsedArgs = JSON.parse(toolCall.function.arguments);
-    } catch (e) {
+    } catch {
       console.error(`[ToolRegistry] Failed to parse arguments for "${toolName}":`, toolCall.function.arguments);
       return {
         role: 'tool',
@@ -118,14 +118,15 @@ export class ToolRegistry {
         tool_call_id: toolCall.id,
         content: JSON.stringify(result),
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(`[ToolRegistry] Error executing tool "${toolName}":`, error);
+      const errMsg = error instanceof Error ? error.message : 'Unknown error';
       return {
         role: 'tool',
         tool_call_id: toolCall.id,
         content: JSON.stringify({
           success: false,
-          message: `Error executing "${toolName}": ${error.message || 'Unknown error'}`,
+          message: `Error executing "${toolName}": ${errMsg}`,
         }),
       };
     }

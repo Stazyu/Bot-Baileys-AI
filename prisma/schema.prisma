@@ -186,3 +186,20 @@ model HttpLog {
   @@index([method, createdAt])
   @@index([status, createdAt])
 }
+
+// ─── Group Moderation / Warnings ──────────────────────────────────
+model GroupWarning {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  groupId   String
+  userId    String
+  count     Int      @default(0)
+  reasons   String[]
+  warnedBy  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([groupId, userId])
+  @@index([groupId])
+  @@index([userId])
+}
+

@@ -1,11 +1,10 @@
 import {
   makeWASocket,
   DisconnectReason,
-  BaileysEventMap,
   ConnectionState,
   Browsers,
 } from '@stazyu/baileys';
-import type { WASocket } from '@stazyu/baileys';
+import type { WASocket, GroupMetadata } from '@stazyu/baileys';
 import pino from 'pino';
 import pinoPretty from 'pino-pretty';
 import { Boom } from '@hapi/boom';
@@ -314,6 +313,14 @@ export class SessionManager {
 
   async getSession(sessionId: string): Promise<WASocket | undefined> {
     return this.sessions.get(sessionId);
+  }
+
+  getGroupMetadata(groupId: string): GroupMetadata | undefined {
+    return this.groupCache.get<GroupMetadata>(groupId);
+  }
+
+  setGroupMetadata(groupId: string, metadata: GroupMetadata): void {
+    this.groupCache.set(groupId, metadata);
   }
 
   /** QR mentah terakhir untuk WS/GET /api/sessions/:id/qr. */

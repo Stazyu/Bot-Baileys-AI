@@ -1,4 +1,4 @@
-import { proto, WAMessage, WAMessageUpdate, WASocket } from '@stazyu/baileys';
+import { proto, WAMessage, WASocket } from '@stazyu/baileys';
 import type { AnyMessageContent, BaileysEventMap } from '@stazyu/baileys';
 import PluginManager from '../plugins/pluginManager.js';
 import { detectSocialMediaLink, downloadFromSocialMedia, type MediaSender } from './autoDownload.js';
@@ -185,7 +185,7 @@ export class BotHandler {
       : undefined;
 
     const prefixes = getPrefixes();
-    const botNumber = this.socket.user?.id?.split(':')[0] + '@s.whatsapp.net';
+    const botNumber = `${this.socket.user?.id?.split(':')[0]}@s.whatsapp.net`;
     const mentions = quotedInfo?.mentionedJid ?? undefined;
     const time = moment().utcOffset(7).format('HH:mm:ss');
     const date = moment().utcOffset(7).format('Do MMMM YYYY, h:mm:ss a');
@@ -233,32 +233,37 @@ export class BotHandler {
       }
     }
 
-    const message_button =
-      type === 'buttonsResponseMessage'
-        ? (chatMessage?.buttonsResponseMessage?.selectedButtonId || null)
-        : type === 'templateMessage'
-          ? (chatMessage?.templateMessage?.hydratedTemplate?.templateId || null)
-          : type === 'templateButtonReplyMessage'
-            ? (chatMessage?.templateButtonReplyMessage?.selectedId || null)
-            : type === 'listResponseMessage'
-              ? (chatMessage?.listResponseMessage?.singleSelectReply?.selectedRowId || null)
-              : type === 'interactiveResponseMessage'
-                ? extractInteractiveButtonId(chatMessage)
-                : null;
+    const getMessageButtonId = (): string | null => {
+      switch (type) {
+        case 'buttonsResponseMessage':
+          return chatMessage?.buttonsResponseMessage?.selectedButtonId || null;
+        case 'templateMessage':
+          return chatMessage?.templateMessage?.hydratedTemplate?.templateId || null;
+        case 'templateButtonReplyMessage':
+          return chatMessage?.templateButtonReplyMessage?.selectedId || null;
+        case 'listResponseMessage':
+          return chatMessage?.listResponseMessage?.singleSelectReply?.selectedRowId || null;
+        case 'interactiveResponseMessage':
+          return extractInteractiveButtonId(chatMessage);
+        default:
+          return null;
+      }
+    };
+    const message_button = getMessageButtonId();
 
-    const command =
-      message_button !== null
-        ? message_button.toLowerCase()
-        : message_prefix !== null && matchedPrefix
-          ? message_prefix.slice(matchedPrefix.length).trim().split(/ +/).shift()?.toLowerCase() || null
-          : null;
+    let command: string | null = null;
+    if (message_button !== null) {
+      command = message_button.toLowerCase();
+    } else if (message_prefix !== null && matchedPrefix) {
+      command = message_prefix.slice(matchedPrefix.length).trim().split(/ +/).shift()?.toLowerCase() || null;
+    }
 
-    const args =
-      message_prefix !== null && matchedPrefix
-        ? message_prefix.slice(matchedPrefix.length).trim().split(/ +/).slice(1)
-        : text
-          ? text.trim().split(/ +/).slice(1)
-          : [];
+    let args: string[] = [];
+    if (message_prefix !== null && matchedPrefix) {
+      args = message_prefix.slice(matchedPrefix.length).trim().split(/ +/).slice(1);
+    } else if (text) {
+      args = text.trim().split(/ +/).slice(1);
+    }
 
     const isCmd = message_button !== null || (matchedPrefix !== null && command !== null && command.length > 0);
 
@@ -582,15 +587,6 @@ export class BotHandler {
     }
   }
 
-  private async handleMessageUpdate(update: WAMessageUpdate): Promise<void> {
-    try {
-      log.debug(`[${this.sessionId}] 📝 Message update received`, update);
-      // Handle message updates (read receipts, edits, etc.)
-    } catch (error) {
-      log.error(`[${this.sessionId}] ❌ Error handling message update:`, error as object);
-    }
-  }
-
   private async handleGroupEvent(event: BaileysEventMap['group-participants.update']): Promise<void> {
     try {
       log.info(`[${this.sessionId}] 👥 Group event: ${event.action || 'unknown'} in ${event.id}`);
@@ -684,9 +680,9 @@ export class BotHandler {
             if (user_id && !isOwner(user_id) && premiumService.isGroupAiLimitEnabled()) {
               const groupAiCheck = await premiumService.checkGroupAiLimit(user_id);
               if (!groupAiCheck.allowed) {
-                const tierMsg = groupAiCheck.tier !== 'free'
-                  ? `\n\n💡 Kamu masih bisa upgrade ke tier lebih tinggi untuk menambah limit.`
-                  : `\n\n💡 Upgrade ke premium untuk mendapatkan 500 group AI chat/hari: ketik *!premium check*`;
+                const tierMsg = groupAiCheck.tier === 'free'
+                  ? `\n\n💡 Upgrade ke premium untuk mendapatkan 500 group AI chat/hari: ketik *!premium check*`
+                  : `\n\n💡 Kamu masih bisa upgrade ke tier lebih tinggi untuk menambah limit.`;
                 await this.socket.sendMessage(from, {
                   text: `❌ Limit group AI harian kamu habis (${groupAiCheck.limit}/hari). Coba lagi besok.${tierMsg}`,
                 });
@@ -723,9 +719,9 @@ export class BotHandler {
             if (user_id && !isOwner(user_id) && premiumService.isPrivateAiLimitEnabled()) {
               const privateAiCheck = await premiumService.checkPrivateAiLimit(user_id);
               if (!privateAiCheck.allowed) {
-                const tierMsg = privateAiCheck.tier !== 'free'
-                  ? `\n\n💡 Kamu masih bisa upgrade ke tier lebih tinggi.`
-                  : `\n\n💡 Upgrade ke premium: ketik *!premium check*`;
+                const tierMsg = privateAiCheck.tier === 'free'
+                  ? `\n\n💡 Upgrade ke premium: ketik *!premium check*`
+                  : `\n\n💡 Kamu masih bisa upgrade ke tier lebih tinggi.`;
                 await this.socket.sendMessage(from, {
                   text: `❌ Limit AI chat harian kamu habis (${privateAiCheck.limit}/hari). Coba lagi besok.${tierMsg}`,
                 });
@@ -929,7 +925,16 @@ export class BotHandler {
       const userId = simplified.user_id || to;
       const pushName = simplified.pushName || 'Kak';
 
-      message = message.replace(/@(?:\d+|all)\b/g, '').trimStart();
+      // Strip ONLY the bot's own mentions/number from the message, never other users' mentions!
+      const botId = this.socket.user?.id?.split(':')[0]?.replace(/\D/g, '');
+      const botLid = this.socket.user?.lid?.split(':')[0]?.replace(/\D/g, '');
+      if (botId) {
+        message = message.replace(new RegExp(`@${botId}\\b`, 'g'), '');
+      }
+      if (botLid) {
+        message = message.replace(new RegExp(`@${botLid}\\b`, 'g'), '');
+      }
+      message = message.replace(/^@bot\b/i, '').replace(/@all\b/g, '').trimStart();
       log.info(`[${this.sessionId}] 💬 Group auto-reply message: "${message.substring(0, 100)}${message.length > 100 ? '...' : ''}"`);
 
       const aiService = await import('../services/aiService.js');
@@ -941,9 +946,29 @@ export class BotHandler {
         sessionId: userId,
         waSessionId: this.sessionId,
         userId,
+        callerLid: simplified.participant || undefined,
         pushName,
         userMessage: message,
+        mentions: simplified.mentions,
+        quotedParticipant: simplified.quotedInfo?.participant || undefined,
       };
+
+      // Append mention/quote hints to prompt if present so AI unambiguously knows who was tagged
+      let aiPromptMessage = message;
+      if (simplified.mentions && simplified.mentions.length > 0) {
+        const tagList = simplified.mentions.map((m) => `@${m.split('@')[0]}`).join(' ');
+        aiPromptMessage = `${message}\n[User yang di-tag di pesan ini: ${tagList}]`;
+      }
+      if (simplified.quotedInfo?.participant) {
+        const qPart = simplified.quotedInfo.participant;
+        const qDigits = qPart.split(':')[0].replace(/\D/g, '');
+        const isBotQuoted = Boolean((botId && qDigits === botId) || (botLid && qDigits === botLid));
+        if (isBotQuoted) {
+          aiPromptMessage = `${aiPromptMessage}\n[Membalas pesan dari bot sebelumnya]`;
+        } else {
+          aiPromptMessage = `${aiPromptMessage}\n[Membalas pesan dari user: @${qPart.split('@')[0]}]`;
+        }
+      }
 
       const groupPrompt = getGroupSystemPrompt(
         simplified.time || new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
@@ -956,7 +981,7 @@ export class BotHandler {
       let fullResponse = '';
       await aiService.default.chatWithTools(
         userId,
-        message,
+        aiPromptMessage,
         groupPrompt,
         async (chunk) => {
           if (chunk.done) return;

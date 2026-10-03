@@ -33,6 +33,11 @@ import {
   execute as executeWebSearch,
 } from "./webSearch.js";
 
+import {
+  definition as groupWarningDef,
+  execute as executeGroupWarning,
+} from "./groupWarning.js";
+
 export const downloadSocialMedia = downloadSocialDef;
 export const downloadYoutube = downloadYoutubeDef;
 export const pinterestSearch = pinterestSearchDef;
@@ -40,6 +45,7 @@ export const galleryDlSticker = galleryDlStickerDef;
 export const pinterestSticker = galleryDlStickerDef;
 export const webFetch = webFetchDef;
 export const webSearch = webSearchDef;
+export const groupWarning = groupWarningDef;
 
 export {
   executeDownloadSocial,
@@ -48,6 +54,7 @@ export {
   executeGalleryDlSticker,
   executeWebFetch,
   executeWebSearch,
+  executeGroupWarning,
 };
 
 /**
@@ -93,5 +100,10 @@ export const allTools: Array<{
     name: "web_search",
     definition: webSearchDef,
     execute: executeWebSearch,
+  },
+  {
+    name: "group_warning",
+    definition: groupWarningDef,
+    execute: executeGroupWarning,
   },
 ];
