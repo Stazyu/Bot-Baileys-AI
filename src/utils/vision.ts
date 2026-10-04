@@ -15,6 +15,14 @@ export interface VisionImage {
   mediaType: string;
   /** Normalized bytes ready for base64 encoding. */
   data: Uint8Array;
+  /**
+   * True when the payload came from a WhatsApp sticker.
+   *
+   * A sticker is not a question — it is the user expressing a mood/reaction, so
+   * the prompt must tell the model to read it as an emotion, not as "what is
+   * in this picture?".
+   */
+  isSticker?: boolean;
 }
 
 /** Reject absurd payloads before downloading — real WA images are far below this. */
@@ -58,13 +66,17 @@ export async function extractVisionImage(
     return null;
   }
 
+  // Sticker ini `image/webp` walau bukan foto — dipakai buat nandain "ini ekspresi".
+  const isSticker = (source.mimetype ?? '').includes('webp');
+
   try {
     const raw = await downloadMediaBuffer(source, 'image', safeMediaHost(socket));
     if (raw.length > MAX_RAW_BYTES) {
       log.warn(`⚠️ [Vision] Downloaded image too large (${raw.length} bytes) — skipping`);
       return null;
     }
-    return await normalize(raw, source.mimetype);
+    const image = await normalize(raw, source.mimetype);
+    return isSticker ? { ...image, isSticker: true } : image;
   } catch (error) {
     log.warn(`⚠️ [Vision] Image load failed: ${(error as Error).message}`);
     return null;

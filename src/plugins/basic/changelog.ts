@@ -20,6 +20,24 @@ const changelogCommand: CommandModule = {
 
 📅 *4 Oktober 2026*
 
+╭━━━「 🧩 *Bot Ngerti Sticker* 」━━━╮
+┃
+┃ • *Feat:* Sticker yang dikirim
+┃   atau dibalas di grup bisa
+┃   dilihat bot, bukan cuma
+┃   gambar biasa.
+┃
+┃ • *Feat:* Sticker dibaca sebagai
+┃   *ekspresi* — bot nangkep mood
+┃   user (ketawa, kesel, bingung)
+┃   dan nanggepin sesuai konteks.
+┃
+┃ • *Fix:* Balas pesan bot pakai
+┃   sticker doang? Langsung direspons,
+┃   nggak diem & nggak nanya-nanya.
+┃
+╰━━━━━━━━━━━━━━━━━━╯
+
 ╭━━━「 👤 *Info Pembuat Bot* 」━━━╮
 ┃
 ┃ • *Feat:* Command baru buat liat

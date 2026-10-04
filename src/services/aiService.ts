@@ -375,6 +375,15 @@ export class AIService {
       parts.push({ type: "text", text: userMessage });
     }
     for (const image of images) {
+      // Stickers carry no text — and an empty text part next to them would make
+      // the model ask "what is this?". Tell it what the sticker IS instead: a
+      // mood the user is expressing, to be read like an emotion, not a question.
+      if (image.isSticker) {
+        parts.push({
+          type: "text",
+          text: "[User mengirim sticker. Sticker ini ekspresi/reaksi dia, bukan pertanyaan: baca mood-nya, lalu tanggapi sesuai konteks obrolan.]",
+        });
+      }
       parts.push({
         type: "file",
         mediaType: image.mediaType || "image/jpeg",

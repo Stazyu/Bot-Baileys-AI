@@ -282,15 +282,20 @@ export function extractContextInfo(content: proto.IMessage | null | undefined): 
 }
 
 /**
- * Downloadable image payload for AI vision input: the message's own image, or
- * the image it replies to (so "apa ini?" over a quoted photo works too).
+ * Downloadable image payload for AI vision input: the message's own image or
+ * sticker, or the one it replies to (so "apa ini?" over a quoted photo works too).
+ *
+ * Stickers count as images on purpose: WhatsApp encrypts them with the SAME HKDF
+ * key as photos (`MEDIA_HKDF_KEY_MAPPING` maps both to 'Image'), so the bytes
+ * decrypt to a plain WebP that vision models read fine. Static, animated, and
+ * `.json` (LOTTIE) stickers all arrive here the same way.
  *
  * Pure payload inspection — no download, no I/O. Returns null when neither the
  * message nor its quote carries an image.
  */
 export function extractVisionImagePayload(
   content: proto.IMessage | null | undefined,
-): proto.Message.IImageMessage | null {
+): proto.Message.IImageMessage | proto.Message.IStickerMessage | null {
   const m = unwrapMessage(content);
   if (!m) {
     return null;
@@ -300,9 +305,17 @@ export function extractVisionImagePayload(
     return m.imageMessage;
   }
 
+  if (m.stickerMessage) {
+    return m.stickerMessage;
+  }
+
   const quoted = extractContextInfo(m)?.quotedMessage;
   if (quoted?.imageMessage) {
     return quoted.imageMessage;
+  }
+
+  if (quoted?.stickerMessage) {
+    return quoted.stickerMessage;
   }
 
   return null;

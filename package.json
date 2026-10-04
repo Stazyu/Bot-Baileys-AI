@@ -18,6 +18,7 @@
     "test:rateLimiter": "tsx --test tests/rateLimiter.test.ts",
     "test:messageValidator": "tsx --test tests/messageValidator.test.ts",
     "test:vision": "tsx --test tests/visionPayload.test.ts",
+    "test:stickerExpression": "tsx --test tests/stickerExpression.test.ts",
     "test:youtubeSearch": "tsx --test tests/youtubeSearchMatch.test.ts",
     "test:mediaDownload": "tsx --test tests/mediaDownload.test.ts",
     "test:creatorInfo": "tsx --test tests/creatorInfo.test.ts",
