@@ -20,6 +20,7 @@
     "test:vision": "tsx --test tests/visionPayload.test.ts",
     "test:youtubeSearch": "tsx --test tests/youtubeSearchMatch.test.ts",
     "test:mediaDownload": "tsx --test tests/mediaDownload.test.ts",
+    "test:creatorInfo": "tsx --test tests/creatorInfo.test.ts",
     "test:aiStreamErrors": "tsx --test tests/aiStreamErrors.test.ts",
     "test:upstreamError": "tsx --test tests/upstreamError.test.ts",
     "type-check": "tsc --noEmit",

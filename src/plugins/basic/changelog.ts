@@ -18,6 +18,53 @@ const changelogCommand: CommandModule = {
 ┃   _Apa yang baru?_
 ╰━━━━━━━━━━━━━━━━━━╯
 
+📅 *4 Oktober 2026*
+
+╭━━━「 👤 *Info Pembuat Bot* 」━━━╮
+┃
+┃ • *Feat:* Command baru buat liat
+┃   pembuat bot & sosial medianya.
+┃
+┃ • *Usage:* \`!owner\` — alias
+┃   \`!creator\`, \`!pembuat\`, \`!dev\`.
+┃
+┃ • *Feat:* AI juga bisa jawab kalau
+┃   ditanya siapa pembuat bot atau
+┃   minta sosmed-nya.
+┃
+╰━━━━━━━━━━━━━━━━━━╯
+
+📅 *3 Oktober 2026*
+
+╭━━━「 👥 *Warning Member* 」━━━╮
+┃
+┃ • *Feat:* Sistem peringatan member
+┃   grup — maks 3x, lalu otomatis
+┃   di-kick dari grup.
+┃
+┃ • *Usage:* \`!warn @user <alasan>\`,
+┃   \`!warn 1 @user\`, \`!unwarn @user\`,
+┃   \`!warnlist\` (admin grup).
+┃
+┃ • *Feat:* AI bisa kasih warning,
+┃   unwarn, & cek warning langsung
+┃   dari obrolan grup.
+┃
+╰━━━━━━━━━━━━━━━━━━╯
+
+📅 *29 September 2026*
+
+╭━━━「 🖼️ *Bot Bisa Liat Gambar* 」━━━╮
+┃
+┃ • *Feat:* Kirim gambar langsung
+┃   atau balas gambar — bot bisa
+┃   liat & jelasin isinya.
+┃
+┃ • *Feat:* Jalan di chat pribadi
+┃   maupun grup.
+┃
+╰━━━━━━━━━━━━━━━━━━╯
+
 📅 *17 Agustus 2026*
 
 ╭━━━━━「 📨 *Sticker Pack Telegram* 」━━━━━╮

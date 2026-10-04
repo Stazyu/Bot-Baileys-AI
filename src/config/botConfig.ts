@@ -3,6 +3,7 @@ import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import dotenv from 'dotenv';
+import { log } from '../utils/logger.js';
 
 dotenv.config();
 
@@ -90,6 +91,32 @@ export function isMaintenance(): boolean {
   return loadConfig().maintenance;
 }
 
+export interface CreatorInfo {
+  name: string;
+  socials?: Record<string, string>;
+  note?: string;
+}
+
+/**
+ * Pembuat bot dibaca dari env BOT_CREATOR (JSON) — contoh:
+ * BOT_CREATOR={"name":"Wahyu","socials":{"instagram":"@wahyu"}}
+ */
+export function getCreatorInfo(): CreatorInfo | null {
+  const raw = process.env.BOT_CREATOR;
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed.name !== 'string' || parsed.name.length === 0) {
+      log.warn('[BotConfig] BOT_CREATOR harus punya field "name"');
+      return null;
+    }
+    return parsed as CreatorInfo;
+  } catch {
+    log.warn('[BotConfig] BOT_CREATOR bukan JSON valid');
+    return null;
+  }
+}
+
 export function getMaintenanceMessage(): string {
   return loadConfig().maintenanceMessage || '🔧 Bot sedang dalam maintenance. Silakan coba lagi nanti.';
 }
@@ -102,4 +129,5 @@ export default {
   isOwner,
   isMaintenance,
   getMaintenanceMessage,
+  getCreatorInfo,
 };
