@@ -2,6 +2,7 @@ import type { CommandModule } from "../../types/index.js";
 import type { ToolContext } from "../../types/tools.js";
 import aiService, { AIService } from "../../services/aiService.js";
 import { isOwner } from "../../config/botConfig.js";
+import { resolvePrivateRole } from "../../services/roleService.js";
 import { getSystemPrompt } from "../../services/systemPrompt.js";
 import { stripToolCallArtifacts } from "../../utils/toolCallFilter.js";
 import { extractVisionImage } from "../../utils/vision.js";
@@ -150,7 +151,7 @@ ${isOwner(userId) ? `• ${context.simplified?.prefix || "!"}ai model <nama mode
       await aiService.chatWithTools(
         userId,
         question,
-        getSystemPrompt(),
+        getSystemPrompt(resolvePrivateRole(userId, context.simplified?.participant || undefined)),
         (chunk) => {
           if (chunk.done) return;
           if (chunk.phase === "progress") return; // don't treat progress ack as final
@@ -196,7 +197,7 @@ export function handleAIMessage(
   userId: string,
   message: string,
 ): Promise<string> {
-  return aiService.chat(userId, message, getSystemPrompt());
+  return aiService.chat(userId, message, getSystemPrompt(resolvePrivateRole(userId)));
 }
 
 export function clearAISession(userId: string): void {

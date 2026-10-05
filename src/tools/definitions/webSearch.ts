@@ -30,7 +30,7 @@ export const definition: AIToolDefinition = {
   function: {
     name: 'web_search',
     description:
-      'Search the web for current information using Firecrawl. Returns search result snippets (title, URL, description) from the web. Useful for finding latest news, prices, facts, or any up-to-date information. If you need full article content, use web_fetch after getting the URL.',
+      'Search the web for current information using Firecrawl. Returns search result snippets (title, URL, description) from the web. MUST be called immediately whenever the user asks about news, current events, or anything time-sensitive — never ask a clarifying question first, never answer such topics from memory. If you need full article content, use web_fetch after getting the URL.',
     parameters: {
       type: 'object',
       properties: {

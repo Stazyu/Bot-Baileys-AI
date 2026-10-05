@@ -71,8 +71,10 @@ test('prompt memuat pembuat + sosmed, tanpa nomor telepon', () => {
 test('format balasan mengikuti sosmed yang diisi', () => {
   withCreator('{"name":"Wahyu","socials":{"Instagram":"@wahyu","Website":"wahyu.dev"}}', () => {
     const prompt = getSystemPrompt();
-    assert.match(prompt, /Instagram: <nilai>/);
-    assert.match(prompt, /Website: <nilai>/);
+    // Social media values are directly injected into the format guide — without <nilai> placeholder.
+    assert.ok(prompt.includes('Instagram: @wahyu'));
+    assert.ok(prompt.includes('Website: wahyu.dev'));
+    assert.doesNotMatch(prompt, /<nilai>/);
   });
 });
 

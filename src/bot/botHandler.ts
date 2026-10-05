@@ -939,6 +939,7 @@ export class BotHandler {
 
       const aiService = await import('../services/aiService.js');
       const { getGroupSystemPrompt } = await import('../services/systemPrompt.js');
+      const { resolveSenderRole } = await import('../services/roleService.js');
 
       const toolContext = {
         socket: this.socket,
@@ -970,9 +971,19 @@ export class BotHandler {
         }
       }
 
+      // Verify sender role LOCALLY (owner config / group admin / member).
+      // Only the role LABEL is sent to the AI prompt — numbers/JIDs are never leaked to providers.
+      const senderRole = await resolveSenderRole(this.socket, {
+        userId,
+        callerLid: simplified.participant || undefined,
+        groupJid: to,
+        fromMe: Boolean(simplified.fromMe),
+      });
+
       const groupPrompt = getGroupSystemPrompt(
         simplified.time || new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
         pushName,
+        senderRole,
       );
 
       // Set composing presence
@@ -1075,8 +1086,15 @@ export class BotHandler {
 
       const aiService = await import('../services/aiService.js');
       const { getSystemPrompt } = await import('../services/systemPrompt.js');
+      const { resolveSenderRole } = await import('../services/roleService.js');
 
-      const systemPrompt = getSystemPrompt();
+      // Private chat: verified owner vs member — text claims are ignored.
+      const senderRole = await resolveSenderRole(this.socket, {
+        userId,
+        callerLid: simplified.participant || undefined,
+        fromMe: Boolean(simplified.fromMe),
+      });
+      const systemPrompt = getSystemPrompt(senderRole);
 
       await this.socket.sendPresenceUpdate('composing', to).catch(() => {});
 

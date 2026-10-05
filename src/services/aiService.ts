@@ -5,6 +5,7 @@ import {
   generateText,
   streamText,
   dynamicTool,
+  jsonSchema,
   isStepCount,
   type ModelMessage,
 } from "ai";
@@ -220,7 +221,11 @@ export class AIService {
         "anthropic/claude-3-haiku";
     }
 
-    if (!this.isConfigured()) {
+    if (this.isConfigured()) {
+      console.log(
+        `✅ [AIService] Provider: ${this.provider} | Model: ${this.model} | URL: ${this.baseUrl}`,
+      );
+    } else {
       let msg: string;
       switch (this.provider) {
         case "ollama":
@@ -240,10 +245,6 @@ export class AIService {
           break;
       }
       console.warn(msg);
-    } else {
-      console.log(
-        `✅ [AIService] Provider: ${this.provider} | Model: ${this.model} | URL: ${this.baseUrl}`,
-      );
     }
 
     if (this.provider !== "ollama" && this.isConfigured()) {
@@ -298,6 +299,12 @@ export class AIService {
     for (const [name, entry] of toolRegistry.entries()) {
       const toolDef = {
         description: entry.definition.function.description,
+        // Tool parameter JSON Schema MUST be forwarded to the model. Without this,
+        // the model hallucinates argument names from descriptions (e.g. {"reason": ...}
+        // instead of {"url": ...}) and execution receives invalid arguments.
+        inputSchema: jsonSchema(
+          entry.definition.function.parameters as Parameters<typeof jsonSchema>[0],
+        ),
         execute: async (args: unknown) => {
           const key = `${name}:${normalizeArgs(args)}`;
           const startedAt = Date.now();
