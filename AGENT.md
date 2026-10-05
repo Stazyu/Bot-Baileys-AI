@@ -371,9 +371,8 @@ pnpm prisma:migrate   # Push schema to MongoDB
 pnpm prisma:studio    # Open Prisma Studio GUI
 
 # Tests
-pnpm test:toolCallFilter
-pnpm test:aiServiceStream
-pnpm test:aiToolChaining
+pnpm test                                  # Run all tests (tsx --test "tests/**/*.test.ts")
+pnpm exec tsx --test tests/<filename>.ts   # Run a single test file (or npx tsx --test ...)
 ```
 
 ---
