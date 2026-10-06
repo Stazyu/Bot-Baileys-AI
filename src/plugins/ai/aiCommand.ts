@@ -5,6 +5,7 @@ import { isOwner } from "../../config/botConfig.js";
 import { resolvePrivateRole } from "../../services/roleService.js";
 import { getSystemPrompt } from "../../services/systemPrompt.js";
 import { stripToolCallArtifacts } from "../../utils/toolCallFilter.js";
+import { buildReplyHint } from "../../utils/messageHelper.js";
 import { extractVisionImage } from "../../utils/vision.js";
 import {
   isAIModeEnabledSync,
@@ -118,6 +119,15 @@ const AICommand: CommandModule = {
     // the picture along with the question.
     const visionImage = await extractVisionImage(context.message?.message, context.socket);
 
+    // `!ai <pertanyaan>` sent AS A REPLY must carry the quoted content too,
+    // otherwise the AI answers its own previous turn instead of the message
+    // the user actually pointed at.
+    const replyHint = buildReplyHint(
+      context.simplified?.quotedInfo,
+      context.socket?.user,
+    );
+    const aiPrompt = replyHint ? `${question}\n${replyHint}` : question;
+
     if (!question && !visionImage) {
       await context.socket.sendMessage(context.fromJid, {
         text: `📖 *Cara Penggunaan AI:*
@@ -144,13 +154,13 @@ ${isOwner(userId) ? `• ${context.simplified?.prefix || "!"}ai model <nama mode
         waSessionId: context.sessionId,
         userId,
         pushName: context.simplified?.pushName ?? undefined,
-        userMessage: question,
+        userMessage: aiPrompt,
       };
 
       let responseBuffer = "";
       await aiService.chatWithTools(
         userId,
-        question,
+        aiPrompt,
         getSystemPrompt(resolvePrivateRole(userId, context.simplified?.participant || undefined)),
         (chunk) => {
           if (chunk.done) return;

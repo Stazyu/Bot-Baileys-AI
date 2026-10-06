@@ -23,6 +23,7 @@ import {
   extractTextFromMessage,
   extractContextInfo,
   extractInteractiveButtonId,
+  buildReplyHint,
   type MessageType,
 } from '../utils/messageHelper.js';
 import { extractVisionImage, hasVisionImage, type VisionImage } from '../utils/vision.js';
@@ -899,6 +900,14 @@ export class BotHandler {
   }
 
   /**
+   * Build the `[Membalas pesan ...]` prompt hint for a reply using this socket's
+   * own identity, so a quote of the bot's own message is labelled as such.
+   */
+  private buildQuotedHint(simplified: SimplifiedMessage): string {
+    return buildReplyHint(simplified.quotedInfo, this.socket.user);
+  }
+
+  /**
    * Load the image attached to a message (or the one it quotes) for AI vision.
    *
    * Returns null when there is none or it could not be downloaded, so callers
@@ -941,6 +950,17 @@ export class BotHandler {
       const { getGroupSystemPrompt } = await import('../services/systemPrompt.js');
       const { resolveSenderRole } = await import('../services/roleService.js');
 
+      // Append mention/quote hints to prompt if present so AI unambiguously knows who was tagged
+      let aiPromptMessage = message;
+      if (simplified.mentions && simplified.mentions.length > 0) {
+        const tagList = simplified.mentions.map((m) => `@${m.split('@')[0]}`).join(' ');
+        aiPromptMessage = `${message}\n[User yang di-tag di pesan ini: ${tagList}]`;
+      }
+      const quotedHint = this.buildQuotedHint(simplified);
+      if (quotedHint) {
+        aiPromptMessage = `${aiPromptMessage}\n${quotedHint}`;
+      }
+
       const toolContext = {
         socket: this.socket,
         fromJid: to,
@@ -949,27 +969,10 @@ export class BotHandler {
         userId,
         callerLid: simplified.participant || undefined,
         pushName,
-        userMessage: message,
+        userMessage: aiPromptMessage,
         mentions: simplified.mentions,
         quotedParticipant: simplified.quotedInfo?.participant || undefined,
       };
-
-      // Append mention/quote hints to prompt if present so AI unambiguously knows who was tagged
-      let aiPromptMessage = message;
-      if (simplified.mentions && simplified.mentions.length > 0) {
-        const tagList = simplified.mentions.map((m) => `@${m.split('@')[0]}`).join(' ');
-        aiPromptMessage = `${message}\n[User yang di-tag di pesan ini: ${tagList}]`;
-      }
-      if (simplified.quotedInfo?.participant) {
-        const qPart = simplified.quotedInfo.participant;
-        const qDigits = qPart.split(':')[0].replace(/\D/g, '');
-        const isBotQuoted = Boolean((botId && qDigits === botId) || (botLid && qDigits === botLid));
-        if (isBotQuoted) {
-          aiPromptMessage = `${aiPromptMessage}\n[Membalas pesan dari bot sebelumnya]`;
-        } else {
-          aiPromptMessage = `${aiPromptMessage}\n[Membalas pesan dari user: @${qPart.split('@')[0]}]`;
-        }
-      }
 
       // Verify sender role LOCALLY (owner config / group admin / member).
       // Only the role LABEL is sent to the AI prompt — numbers/JIDs are never leaked to providers.
@@ -1098,6 +1101,11 @@ export class BotHandler {
 
       await this.socket.sendPresenceUpdate('composing', to).catch(() => {});
 
+      // A reply in private chat carries the quoted message too — without it the
+      // AI answers its own previous turn instead of what the user replied to.
+      const quotedHint = this.buildQuotedHint(simplified);
+      const aiPromptMessage = quotedHint ? `${message}\n${quotedHint}` : message;
+
       const toolContext = {
         socket: this.socket,
         fromJid: to,
@@ -1105,13 +1113,13 @@ export class BotHandler {
         waSessionId: this.sessionId,
         userId,
         pushName: simplified.pushName ?? undefined,
-        userMessage: message,
+        userMessage: aiPromptMessage,
       };
 
       let fullResponse = '';
       await aiService.default.chatWithTools(
         userId,
-        message,
+        aiPromptMessage,
         systemPrompt,
         async (chunk) => {
           if (chunk.done) return;

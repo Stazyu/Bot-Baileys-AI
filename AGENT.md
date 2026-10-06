@@ -210,7 +210,16 @@ Two distinct prompts in [`src/services/systemPrompt.ts`](src/services/systemProm
 - **`getSystemPrompt()`** — AI mode (private chat): helpful assistant, understands short commands, anti-rambling, tool usage rules
 - **`getGroupSystemPrompt(time, pushName)`** — Group auto-reply: personality-driven, Indonesian banter, time roasting, tone mirroring, no coding help
 
-### 5.5 Available AI Tools
+### 5.5 Reply & Quote Context
+A REPLY's meaning lives in the message it points at, not in the bot's own conversation history — so the quoted content is injected into the prompt on **every** AI path:
+
+- [`buildReplyHint()`](src/utils/messageHelper.ts) appends `[Membalas pesan ...: "<isi>"]`. Used by group auto-reply + private AI mode ([`botHandler.ts`](src/bot/botHandler.ts)) and `!ai <pertanyaan>` ([`aiCommand.ts`](src/plugins/ai/aiCommand.ts)). Payloads without text become a marker (`[gambar]`, `[sticker]`, …); long quotes are truncated.
+- Vision payloads carry `VisionImage.source` (`'own' | 'quoted'`) so `buildUserContent()` can word the sticker hint correctly: a sticker the user *sent* is their mood, a sticker they *replied to* is the subject of their question.
+- Both prompts carry a matching strict rule block ("BALASAN / REPLY", "REPLY CONTEXT").
+
+**Invariant:** any new AI entry point must call `buildReplyHint()` too — without it the model falls back to its own cached turns and answers the wrong message.
+
+### 5.6 Available AI Tools
 | Tool | Purpose |
 |------|---------|
 | `web_search` | Search the web via DuckDuckGo |

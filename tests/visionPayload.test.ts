@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { proto } from '@stazyu/baileys';
-import { extractVisionImagePayload } from '../src/utils/messageHelper.js';
+import { extractVisionImagePayload, extractVisionImageSource } from '../src/utils/messageHelper.js';
 import { hasVisionImage } from '../src/utils/vision.js';
 
 const image = (caption?: string): proto.Message.IImageMessage => ({
@@ -111,4 +111,43 @@ test('an own image wins over a quoted sticker', () => {
     },
   });
   assert.equal(captionOf(payload), 'ini fotoku');
+});
+
+test('extractVisionImageSource marks a payload sent by the user as own', () => {
+  assert.equal(extractVisionImageSource({ imageMessage: image() })?.source, 'own');
+  assert.equal(extractVisionImageSource({ stickerMessage: sticker() })?.source, 'own');
+});
+
+test('extractVisionImageSource marks a quoted payload as quoted', () => {
+  const fromQuote = extractVisionImageSource({
+    extendedTextMessage: {
+      text: 'ini maksudnya apa',
+      contextInfo: { quotedMessage: { stickerMessage: sticker() } },
+    },
+  });
+  assert.equal(fromQuote?.source, 'quoted');
+  assert.ok(fromQuote?.payload);
+
+  const quotedImage = extractVisionImageSource({
+    extendedTextMessage: {
+      text: 'ini apa?',
+      contextInfo: { quotedMessage: { imageMessage: image() } },
+    },
+  });
+  assert.equal(quotedImage?.source, 'quoted');
+});
+
+test('extractVisionImageSource prefers the own payload over the quote', () => {
+  const resolved = extractVisionImageSource({
+    stickerMessage: {
+      ...sticker(),
+      contextInfo: { quotedMessage: { imageMessage: image() } },
+    },
+  });
+  assert.equal(resolved?.source, 'own');
+});
+
+test('extractVisionImageSource returns null without an image', () => {
+  assert.equal(extractVisionImageSource({ conversation: 'halo' }), null);
+  assert.equal(extractVisionImageSource(undefined), null);
 });

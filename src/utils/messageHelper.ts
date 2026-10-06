@@ -282,6 +282,185 @@ export function extractContextInfo(content: proto.IMessage | null | undefined): 
 }
 
 /**
+ * Quoted-message summary for AI prompts.
+ *
+ * A reply's meaning usually lives in the message it quotes — especially when
+ * the bot never saw the original (another member's message, or a bot reply
+ * that already expired from the conversation cache). Without the quoted content
+ * the model ends up answering its own previous turn instead of the message the
+ * user actually replied to.
+ */
+export interface QuotedMessageSummary {
+  /** Quoted text, or a bracketed placeholder (`[gambar]`) when it carries none. */
+  text: string;
+  /** True when `text` is a placeholder, i.e. the quote has no readable text. */
+  isPlaceholder: boolean;
+}
+
+/** Placeholder for quoted payloads that carry no text of their own. */
+const QUOTED_PLACEHOLDERS: Partial<Record<MessageType, string>> = {
+  imageMessage: '[gambar]',
+  videoMessage: '[video]',
+  audioMessage: '[audio/voice note]',
+  stickerMessage: '[sticker]',
+  documentMessage: '[dokumen]',
+  contactMessage: '[kontak]',
+  locationMessage: '[lokasi]',
+  pollCreationMessage: '[poll]',
+  pollCreationMessageV2: '[poll]',
+  pollCreationMessageV3: '[poll]',
+};
+
+/** Max characters of quoted text forwarded to the AI — keeps prompts bounded. */
+const MAX_QUOTED_TEXT_LENGTH = 500;
+
+/**
+ * Describe a quoted message payload for an AI prompt.
+ *
+ * Returns null when there is no quote at all. Container payloads are unwrapped
+ * first, whitespace is collapsed so the quote stays a single prompt line, and
+ * long text is truncated — a quoted wall of text must not blow up the request.
+ */
+export function describeQuotedMessage(
+  quoted: proto.IMessage | null | undefined,
+): QuotedMessageSummary | null {
+  const m = unwrapMessage(quoted);
+  if (!m) {
+    return null;
+  }
+
+  const text = extractTextFromMessage(m);
+  if (text?.trim()) {
+    const normalized = text.replace(/\s+/g, ' ').trim();
+    return {
+      text:
+        normalized.length > MAX_QUOTED_TEXT_LENGTH
+          ? `${normalized.slice(0, MAX_QUOTED_TEXT_LENGTH)}…`
+          : normalized,
+      isPlaceholder: false,
+    };
+  }
+
+  const type = getRealContentType(m);
+  return {
+    text: (type && QUOTED_PLACEHOLDERS[type]) || '[pesan tanpa teks]',
+    isPlaceholder: true,
+  };
+}
+
+/** Bot's own WhatsApp identity, used to tell "replied to the bot" from "replied to a member". */
+export interface BotIdentity {
+  /** Bot JID, e.g. `628123:1@s.whatsapp.net`. */
+  id?: string | null;
+  /** Bot LID, e.g. `123456:1@lid`. */
+  lid?: string | null;
+}
+
+/** Digits only, so `628123:1@s.whatsapp.net` and `628123` compare equal. */
+function jidDigits(jid: string | null | undefined): string {
+  return jid?.split(':')[0].replace(/\D/g, '') ?? '';
+}
+
+/**
+ * Build the `[Membalas pesan ...]` prompt hint for a reply.
+ *
+ * Carries the QUOTED CONTENT, not just who was quoted. A reply's meaning lives
+ * in the message it points at, and that message is often not in the AI's own
+ * history (another member's chat, a bot reply that expired from the cache, or a
+ * private-chat reply where the bot never stored the quoted turn) — without the
+ * content the model just re-answers its own previous message.
+ *
+ * Returns '' when the message is not a reply.
+ */
+export function buildReplyHint(
+  quotedInfo: proto.IContextInfo | null | undefined,
+  bot: BotIdentity = {},
+): string {
+  const summary = describeQuotedMessage(quotedInfo?.quotedMessage);
+  if (!summary) {
+    return '';
+  }
+
+  const botId = jidDigits(bot.id);
+  const botLid = jidDigits(bot.lid);
+  const participant = quotedInfo?.participant || '';
+  const quoteDigits = jidDigits(participant);
+  const isBotQuoted = Boolean(
+    (botId && quoteDigits === botId) || (botLid && quoteDigits === botLid),
+  );
+
+  let who: string;
+  if (isBotQuoted) {
+    who = 'Membalas pesan BOT sendiri sebelumnya';
+  } else if (participant) {
+    who = `Membalas pesan dari user @${participant.split('@')[0]}`;
+  } else {
+    who = 'Membalas pesan sebelumnya';
+  }
+
+  // Placeholders ([gambar], [sticker]) are already bracketed — quoting them
+  // again would read as literal text rather than a note.
+  const content = summary.isPlaceholder ? summary.text : `"${summary.text}"`;
+  return `[${who}: ${content}]`;
+}
+
+/**
+ * Downloadable image payload for AI vision input: the message's own image or
+ * sticker, or the one it replies to (so "apa ini?" over a quoted photo works too).
+ *
+ * Stickers count as images on purpose: WhatsApp encrypts them with the SAME HKDF
+ * key as photos (`MEDIA_HKDF_KEY_MAPPING` maps both to 'Image'), so the bytes
+ * decrypt to a plain WebP that vision models read fine. Static, animated, and
+ * `.json` (LOTTIE) stickers all arrive here the same way.
+ *
+ * Pure payload inspection — no download, no I/O. Returns null when neither the
+ * message nor its quote carries an image.
+ */
+/** Where a vision payload came from — the message itself, or the one it quotes. */
+export type VisionImageSource = 'own' | 'quoted';
+
+/** A vision payload plus its origin. */
+export interface VisionImageResolution {
+  payload: proto.Message.IImageMessage | proto.Message.IStickerMessage;
+  source: VisionImageSource;
+}
+
+/**
+ * Resolve the image/sticker payload AND where it came from.
+ *
+ * The origin matters for stickers: one the user sends is an expression of their
+ * mood, while one they REPLY to is the subject of a question — the prompt must
+ * tell the model which of the two it is looking at.
+ */
+export function extractVisionImageSource(
+  content: proto.IMessage | null | undefined,
+): VisionImageResolution | null {
+  const m = unwrapMessage(content);
+  if (!m) {
+    return null;
+  }
+
+  if (m.imageMessage) {
+    return { payload: m.imageMessage, source: 'own' };
+  }
+
+  if (m.stickerMessage) {
+    return { payload: m.stickerMessage, source: 'own' };
+  }
+
+  const quoted = extractContextInfo(m)?.quotedMessage;
+  if (quoted?.imageMessage) {
+    return { payload: quoted.imageMessage, source: 'quoted' };
+  }
+
+  if (quoted?.stickerMessage) {
+    return { payload: quoted.stickerMessage, source: 'quoted' };
+  }
+
+  return null;
+}
+
+/**
  * Downloadable image payload for AI vision input: the message's own image or
  * sticker, or the one it replies to (so "apa ini?" over a quoted photo works too).
  *
@@ -296,27 +475,5 @@ export function extractContextInfo(content: proto.IMessage | null | undefined): 
 export function extractVisionImagePayload(
   content: proto.IMessage | null | undefined,
 ): proto.Message.IImageMessage | proto.Message.IStickerMessage | null {
-  const m = unwrapMessage(content);
-  if (!m) {
-    return null;
-  }
-
-  if (m.imageMessage) {
-    return m.imageMessage;
-  }
-
-  if (m.stickerMessage) {
-    return m.stickerMessage;
-  }
-
-  const quoted = extractContextInfo(m)?.quotedMessage;
-  if (quoted?.imageMessage) {
-    return quoted.imageMessage;
-  }
-
-  if (quoted?.stickerMessage) {
-    return quoted.stickerMessage;
-  }
-
-  return null;
+  return extractVisionImageSource(content)?.payload ?? null;
 }

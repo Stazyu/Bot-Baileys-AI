@@ -194,3 +194,36 @@ test('simplified leaves message_prefix null when no prefix matched', () => {
   // Still exposed even though this payload carries no text at all.
   assert.equal(simplified.botNumber, '62899999999@s.whatsapp.net');
 });
+
+test('simplified exposes quoted content for a reply', () => {
+  const handler = new BotHandler(createMockSocket(), 'test-session');
+
+  const simplified = handler.simplified({
+    key: {
+      remoteJid: '123456789@g.us',
+      id: 'MSG-007',
+      fromMe: false,
+      participant: '62812345678@s.whatsapp.net',
+    },
+    message: {
+      extendedTextMessage: {
+        text: 'ini maksudnya apa?',
+        contextInfo: {
+          participant: '62811111111@s.whatsapp.net',
+          quotedMessage: {
+            ephemeralMessage: {
+              message: { conversation: 'besok kita rapat jam 9' },
+            },
+          },
+        },
+      },
+    },
+    messageTimestamp: Math.floor(Date.now() / 1000),
+  });
+
+  // The reply handler reads the quoted payload straight off `quotedInfo`.
+  assert.equal(
+    simplified.quotedInfo?.quotedMessage?.conversation,
+    'besok kita rapat jam 9',
+  );
+});

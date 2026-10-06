@@ -7,6 +7,8 @@ import {
   extractTextFromMessage,
   extractContextInfo,
   extractInteractiveButtonId,
+  describeQuotedMessage,
+  buildReplyHint,
 } from '../src/utils/messageHelper.js';
 
 test('unwrapMessage unwraps ephemeralMessage', () => {
@@ -278,4 +280,96 @@ test('extractContextInfo reads contextInfo from non-text payloads (image caption
   const ctx = extractContextInfo(imageWithQuote);
   assert.equal(ctx?.stanzaId, 'ORIGINAL-ID');
   assert.ok(ctx?.quotedMessage?.stickerMessage);
+});
+
+test('describeQuotedMessage returns quoted text with whitespace collapsed', () => {
+  const summary = describeQuotedMessage({
+    extendedTextMessage: { text: '  ini   pesan\npanjang  ' },
+  });
+  assert.equal(summary?.text, 'ini pesan panjang');
+  assert.equal(summary?.isPlaceholder, false);
+});
+
+test('describeQuotedMessage unwraps container payloads before reading text', () => {
+  const summary = describeQuotedMessage({
+    ephemeralMessage: {
+      message: { extendedTextMessage: { text: 'pesan dari ephemeral' } },
+    },
+  });
+  assert.equal(summary?.text, 'pesan dari ephemeral');
+});
+
+test('describeQuotedMessage falls back to a media marker when the quote has no text', () => {
+  const image = describeQuotedMessage({ imageMessage: { mimetype: 'image/jpeg' } });
+  assert.equal(image?.text, '[gambar]');
+  assert.equal(image?.isPlaceholder, true);
+
+  const sticker = describeQuotedMessage({ stickerMessage: { mimetype: 'image/webp' } });
+  assert.equal(sticker?.text, '[sticker]');
+
+  const empty = describeQuotedMessage({ buttonsMessage: {} });
+  assert.equal(empty?.text, '[pesan tanpa teks]');
+});
+
+test('describeQuotedMessage truncates long quoted text', () => {
+  const summary = describeQuotedMessage({ conversation: 'a'.repeat(600) });
+  assert.equal(summary?.text.length, 501);
+  assert.ok(summary?.text.endsWith('…'));
+});
+
+test('describeQuotedMessage returns null when there is no quote', () => {
+  assert.equal(describeQuotedMessage(undefined), null);
+  assert.equal(describeQuotedMessage(null), null);
+});
+
+test('buildReplyHint labels a reply to another member', () => {
+  const hint = buildReplyHint(
+    {
+      participant: '62811111111@s.whatsapp.net',
+      quotedMessage: { conversation: 'besok rapat jam 9' },
+    },
+    { id: '62899999999:1@s.whatsapp.net', lid: '62899999999:1@lid' },
+  );
+  assert.equal(hint, '[Membalas pesan dari user @62811111111: "besok rapat jam 9"]');
+});
+
+test('buildReplyHint recognises a reply to the bot by JID or LID', () => {
+  const bot = { id: '62899999999:1@s.whatsapp.net', lid: '181277718237417:1@lid' };
+
+  assert.match(
+    buildReplyHint(
+      { participant: '62899999999@s.whatsapp.net', quotedMessage: { conversation: 'balasanku' } },
+      bot,
+    ),
+    /^\[Membalas pesan BOT sendiri sebelumnya: "balasanku"\]$/,
+  );
+
+  assert.match(
+    buildReplyHint(
+      { participant: '181277718237417@lid', quotedMessage: { conversation: 'balasanku' } },
+      bot,
+    ),
+    /^\[Membalas pesan BOT sendiri sebelumnya: /,
+  );
+});
+
+test('buildReplyHint collapses whitespace and marks text-less quotes', () => {
+  const hint = buildReplyHint({
+    participant: '62811111111@s.whatsapp.net',
+    quotedMessage: { extendedTextMessage: { text: '  ini\n  pesan  ' } },
+  });
+  assert.equal(hint, '[Membalas pesan dari user @62811111111: "ini pesan"]');
+
+  // Already-bracketed placeholder must not be wrapped in quotes again.
+  const media = buildReplyHint({
+    participant: '62811111111@s.whatsapp.net',
+    quotedMessage: { imageMessage: {} },
+  });
+  assert.equal(media, '[Membalas pesan dari user @62811111111: [gambar]]');
+});
+
+test('buildReplyHint returns empty string when the message is not a reply', () => {
+  assert.equal(buildReplyHint(undefined), '');
+  assert.equal(buildReplyHint(null), '');
+  assert.equal(buildReplyHint({ participant: '62811111111@s.whatsapp.net' }), '');
 });

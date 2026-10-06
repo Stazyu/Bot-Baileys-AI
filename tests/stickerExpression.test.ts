@@ -43,3 +43,30 @@ test('teks saja tetap string biasa (fast path)', () => {
   assert.equal(buildContent('halo', null), 'halo');
   assert.equal(buildContent('halo', []), 'halo');
 });
+
+test('sticker yang DIKIRIM user dapat hint ekspresi', () => {
+  const parts = buildContent('', [jpeg({ isSticker: true, source: 'own' })]) as { type: string; text?: string }[];
+  assert.equal(parts[0].type, 'text');
+  assert.match(parts[0].text ?? '', /user mengirim sticker/i);
+  assert.match(parts[0].text ?? '', /bukan pertanyaan/i);
+});
+
+test('sticker yang DI-BALAS user dapat hint subjek pertanyaan, bukan ekspresi', () => {
+  const parts = buildContent('ini maksudnya apa', [
+    jpeg({ isSticker: true, source: 'quoted' }),
+  ]) as { type: string; text?: string }[];
+
+  assert.equal(parts[0].text, 'ini maksudnya apa');
+
+  const hint = parts[1].text ?? '';
+  assert.match(hint, /DI-BALAS/i);
+  // Regresi: hint lama menyuruh model membacanya sebagai ekspresi user —
+  // itu menghapus pertanyaan yang justru sedang ditanyakan.
+  assert.doesNotMatch(hint, /User mengirim sticker/i);
+  assert.match(hint, /jawab isi stickernya/i);
+});
+
+test('tanpa source, hint sticker tetap aman (default = dikirim sendiri)', () => {
+  const parts = buildContent('', [jpeg({ isSticker: true })]) as { type: string; text?: string }[];
+  assert.match(parts[0].text ?? '', /user mengirim sticker/i);
+});

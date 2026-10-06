@@ -1,7 +1,11 @@
 import type { proto } from '@stazyu/baileys';
 import sharp from 'sharp';
 import { downloadMediaBuffer, safeMediaHost } from './mediaDownload.js';
-import { extractVisionImagePayload } from './messageHelper.js';
+import {
+  extractVisionImagePayload,
+  extractVisionImageSource,
+  type VisionImageSource,
+} from './messageHelper.js';
 import { log } from './logger.js';
 
 /**
@@ -23,6 +27,14 @@ export interface VisionImage {
    * in this picture?".
    */
   isSticker?: boolean;
+  /**
+   * Origin of the payload.
+   *
+   * `own` = the user sent it; `quoted` = it is the message they replied to.
+   * Stickers need this distinction: one the user sends is a mood, while one
+   * they reply to is the SUBJECT of their question.
+   */
+  source?: VisionImageSource;
 }
 
 /** Reject absurd payloads before downloading — real WA images are far below this. */
@@ -51,8 +63,9 @@ export async function extractVisionImage(
   content: proto.IMessage | null | undefined,
   socket?: MediaHostSource,
 ): Promise<VisionImage | null> {
-  const source = extractVisionImagePayload(content);
-  if (!source) return null;
+  const resolved = extractVisionImageSource(content);
+  if (!resolved) return null;
+  const source = resolved.payload;
 
   // Undownloadable payload (no key/path) — nothing we can fetch.
   if (!source.mediaKey && !source.url && !source.directPath) {
@@ -68,6 +81,7 @@ export async function extractVisionImage(
 
   // Sticker ini `image/webp` walau bukan foto — dipakai buat nandain "ini ekspresi".
   const isSticker = (source.mimetype ?? '').includes('webp');
+  const origin: VisionImageSource = resolved.source;
 
   try {
     const raw = await downloadMediaBuffer(source, 'image', safeMediaHost(socket));
@@ -76,7 +90,7 @@ export async function extractVisionImage(
       return null;
     }
     const image = await normalize(raw, source.mimetype);
-    return isSticker ? { ...image, isSticker: true } : image;
+    return { ...image, ...(isSticker ? { isSticker: true } : {}), source: origin };
   } catch (error) {
     log.warn(`⚠️ [Vision] Image load failed: ${(error as Error).message}`);
     return null;

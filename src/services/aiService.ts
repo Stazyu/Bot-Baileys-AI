@@ -383,12 +383,19 @@ export class AIService {
     }
     for (const image of images) {
       // Stickers carry no text — and an empty text part next to them would make
-      // the model ask "what is this?". Tell it what the sticker IS instead: a
-      // mood the user is expressing, to be read like an emotion, not a question.
+      // the model ask "what is this?". Tell it what the sticker IS instead.
+      //
+      // Origin decides the wording: a sticker the user SENT is their own mood,
+      // while one they REPLIED to is the subject of their question — telling the
+      // model the former while answering the latter makes it read a question as
+      // an emotion and skip it.
       if (image.isSticker) {
         parts.push({
           type: "text",
-          text: "[User mengirim sticker. Sticker ini ekspresi/reaksi dia, bukan pertanyaan: baca mood-nya, lalu tanggapi sesuai konteks obrolan.]",
+          text:
+            image.source === "quoted"
+              ? "[Sticker ini adalah pesan yang DI-BALAS user, bukan yang dia kirim. Kalau dia bertanya atau menyinggung isinya, jawab isi stickernya; kalau dia cuma bereaksi, tanggapi reaksinya.]"
+              : "[User mengirim sticker. Sticker ini ekspresi/reaksi dia, bukan pertanyaan: baca mood-nya, lalu tanggapi sesuai konteks obrolan.]",
         });
       }
       parts.push({
