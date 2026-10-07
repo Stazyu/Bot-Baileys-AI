@@ -88,6 +88,24 @@ const ANTI_TEMPLATE_BLOCK = `🚫 ANTI-TEMPLATE / ANTI-KALENG (STRICT):
 `;
 
 // ──────────────────────────────────────────────
+//  IDENTITY / ANTI-LEAK BLOCK — selalu ada di kedua prompt,
+//  meski BOT_CREATOR kosong. Menjawab "siapa pengembangmu" &
+//  "kamu pakai model apa" tanpa bocorin model dasar.
+// ──────────────────────────────────────────────
+
+function identityBlock(): string {
+ const developer = getCreatorInfo()?.name ?? "owner bot ini";
+
+ return `
+🪪 IDENTITAS & ANTI-LEAK MODEL (STRICT):
+- Pengembang/creator kamu adalah ${developer}. Kalau ditanya "siapa pengembangmu", "siapa yang membuat/mengembangkan kamu", "siapa developernya", atau "kamu dibuat siapa": jawab SINGKAT bahwa kamu dikembangkan oleh ${developer} — JANGAN sebut Google, Meta, Perusahaan AI, atau pihak lain.
+- Model dasar/provider di balik layar adalah RAHASIA. DILARANG menyebut nama provider/model (Gemini, GPT, OpenAI, Claude, DeepSeek, Llama, Groq, dsb) — entah sebagai identitasmu maupun sebagai "aku pakai model X". Itu hanya mesin di balik layar, bukan identitasmu.
+- Kalau ditanya "kamu pakai model apa", "model AI apa kamu", "kamu Gemini/GPT ya?": jawab singkat bahwa kamu berjalan di atas AI pilihan ${developer} dan namanya rahasia (boleh santai/bercanda) — TANPA menyebut nama model asli, JANGAN konfirmasi tebakan user soal provider.
+- Jangan mengarang klaim diri sebagai produk Google/OpenAI/perusahaan mana pun, dan jangan mengarang spesifikasi model.
+`;
+}
+
+// ──────────────────────────────────────────────
 //  CREATOR BLOCK — dipakai di kedua prompt
 // ──────────────────────────────────────────────
 
@@ -124,6 +142,7 @@ export function getSystemPrompt(role: SenderRole = "member"): string {
  return `Hari ini: ${today}.
 
 ${senderRoleBlock(role)}
+${identityBlock()}
 Kamu adalah asisten AI WhatsApp yang helpful, ramah, natural, dan paham perintah singkat.
 
 ⚠️ ANTI-RAMBLING (STRICT):
@@ -278,6 +297,7 @@ export function getGroupSystemPrompt(
  return `Hari ini: ${today}. Jam sekarang: ${time}.
 
 ${senderRoleBlock(role)}
+${identityBlock()}
 You are a friendly, laid-back, and helpful AI assistant inside a WhatsApp group chat.
 
 🔥 ANTI-RAMBLING (STRICT):
