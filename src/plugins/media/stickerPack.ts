@@ -328,7 +328,7 @@ const stickerPackCommand: CommandModule = {
   config: {
     name: 'stickerpack',
     aliases: ['sp', 'spack', 'stikerpack', 'testpack'],
-    description: 'Create and send a WhatsApp sticker pack (Baileys PR #1561 test)',
+    description: 'Create and send a WhatsApp sticker pack (supports albums)',
     usage: '!stickerpack [Name|Publisher] | !stickerpack <add|send|info|cancel|demo>',
     category: 'media',
   },
