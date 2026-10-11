@@ -7,6 +7,7 @@ const testbuttonCommand: CommandModule = {
         description: 'Send an interactive list message',
         usage: '!testbutton',
         category: 'owner',
+        ownerOnly: true,
     },
     handler: async function (context, args: string[]): Promise<void> {
         const jid = context.fromJid;

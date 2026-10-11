@@ -45,15 +45,16 @@ const helpCommand: CommandModule = {
     const matchedPrefix = context.simplified?.matchedPrefix || prefixes[0] || '!';
 
     const senderJid = context.simplified?.user_id || context.fromJid || '';
-    const isOwnerUser = isOwner(senderJid);
+    const isOwnerUser = Boolean(context.fromMe || (senderJid && isOwner(senderJid)));
 
     const allCommands = pm.getAllCommands();
 
     if (args.length > 0) {
       const commandName = args[0].toLowerCase();
       const command = pm.getCommand(commandName);
+      const isOwnerCmd = Boolean(command?.config.ownerOnly || command?.config.category === 'owner');
 
-      if (command && (!command.config.ownerOnly || isOwnerUser)) {
+      if (command && (!isOwnerCmd || isOwnerUser)) {
         const aliasesText = command.config.aliases
           ? `\n┃ ✦ *Alias:* ${command.config.aliases.map((a: string) => `\`${matchedPrefix}${a}\``).join(', ')}`
           : '';
@@ -83,8 +84,9 @@ const helpCommand: CommandModule = {
       const categories = new Map<string, CommandEntry[]>();
 
       for (const cmd of allCommands) {
-        // Hide owner-only commands from non-owner users.
-        if (cmd.config.ownerOnly && !isOwnerUser) {
+        const isOwnerCmd = Boolean(cmd.config.ownerOnly || cmd.config.category === 'owner');
+        // Hide owner-only commands and owner category from non-owner users.
+        if (isOwnerCmd && !isOwnerUser) {
           continue;
         }
 

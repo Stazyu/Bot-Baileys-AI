@@ -11,6 +11,7 @@ const command: CommandModule = {
     description: 'Manage premium tiers and limit toggles',
     usage: '!premium <set|remove|check|list|toggle|status>',
     category: 'owner',
+    ownerOnly: true,
     cooldown: 2,
     limitEnabled: false,
   },
@@ -52,11 +53,10 @@ const command: CommandModule = {
       }
 
       case 'check': {
-        const checkJid = args[1]?.includes('@s.whatsapp.net')
-          ? args[1]
-          : args[1]
-            ? `${args[1]}@s.whatsapp.net`
-            : (context.simplified?.user_id || from);
+        let checkJid = context.simplified?.user_id || from;
+        if (args[1]) {
+          checkJid = args[1].includes('@s.whatsapp.net') ? args[1] : `${args[1]}@s.whatsapp.net`;
+        }
         const user = await userService.getUser(checkJid);
         if (!user) {
           await context.socket.sendMessage(from, { text: '❌ User tidak ditemukan di database.' });
@@ -64,12 +64,16 @@ const command: CommandModule = {
         }
         const tierConfig = premiumService.getTierConfig(user.tier);
         const usage = await premiumService.getTodayUsage(checkJid);
+        const statusDetail = user.tier === 'free' ? 'Pengguna Gratis' : 'Premium (no expiry)';
+        const expiryLine = user.premiumExpiry
+          ? `├ Premium sampai: ${user.premiumExpiry.toLocaleDateString('id-ID')}`
+          : `├ Status: ${statusDetail}`;
         const lines = [
           `📊 *Status User*`,
           `├ ID: \`${user.userId.split('@')[0]}\``,
           `├ Nama: ${user.pushName || '(tidak diketahui)'}`,
           `├ Tier: *${user.tier.toUpperCase()}*`,
-          user.premiumExpiry ? `├ Premium sampai: ${user.premiumExpiry.toLocaleDateString('id-ID')}` : `├ Status: ${user.tier === 'free' ? 'Pengguna Gratis' : 'Premium (no expiry)'}`,
+          expiryLine,
           `├ Status: ${user.status}`,
           ``,
           `📈 *Pemakaian Hari Ini*`,

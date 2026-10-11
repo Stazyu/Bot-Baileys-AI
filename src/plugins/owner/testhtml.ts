@@ -108,6 +108,7 @@ const testhtmlCommand: CommandModule = {
     description: 'Test fitur terbaru Baileys: kirim interactive HTML (sendRichHtml)',
     usage: '!testhtml',
     category: 'owner',
+    ownerOnly: true,
   },
   handler: async function (context, args: string[]): Promise<void> {
     const jid = context.fromJid;
