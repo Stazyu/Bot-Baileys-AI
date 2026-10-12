@@ -1031,6 +1031,22 @@ export class BotHandler {
         throw new Error('AI response empty after all retries (model returned no text content).');
       }
 
+      // @angka yang ditulis AI (mis. daftar warning) → mentions asli agar nge-tag.
+      // Prompt memaksa AI mengulang @<angka> persis dari hasil tool; di sini
+      // di-resolve ke JID partisipan. Obrolan biasa tidak mengandung @angka
+      // (aturan ANTI-ROBOTIC TAGS), jadi ini no-op untuk chat normal.
+      let replyMentions: string[] | undefined;
+      try {
+        const { extractTagDigits, resolveTagMentions, getGroupMetadataSafely } = await import('../services/warningService.js');
+        const digits = extractTagDigits(safeResponse);
+        if (digits.length > 0) {
+          const metadata = await getGroupMetadataSafely(this.socket, to, this.sessionId);
+          replyMentions = resolveTagMentions(digits, metadata.participants);
+        }
+      } catch {
+        // Gagal resolve → kirim teks apa adanya (tag jadi teks biasa).
+      }
+
       const quotedMessageObj = proto.WebMessageInfo.fromObject({
         key: {
           remoteJid: simplified.from,
@@ -1043,6 +1059,7 @@ export class BotHandler {
 
       await this.socket.sendMessage(to, {
         text: safeResponse,
+        ...(replyMentions ? { mentions: replyMentions } : {}),
       }, { quoted: quotedMessageObj });
       bus.emitActivity({ type: 'ai', sessionId: this.sessionId, detail: 'AI replied in group' });
       this.trackReply();
