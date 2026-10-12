@@ -3,6 +3,7 @@ import { createSession, loadActiveSessions, disconnectAllSessions, getAllSession
 import prisma from './database/prisma.js';
 import { registerAllTools } from './tools/index.js';
 import { premiumService } from './services/premiumService.js';
+import { startMemoryRetentionLoop } from './services/memoryService.js';
 import { startServer, stopServer } from './server/index.js';
 import type { FastifyInstance } from 'fastify';
 
@@ -29,6 +30,9 @@ async function main() {
 
   // Initialize premium service (load toggle flags from DB)
   await premiumService.init();
+
+  // Prune expired AiMemory rows hourly (unref'd — never holds the loop).
+  startMemoryRetentionLoop();
 
   // Get command line arguments BEFORE loading sessions so we know intent
   const args = process.argv.slice(2);

@@ -15,6 +15,7 @@ import { rateLimiter } from '../utils/rateLimiter.js';
 import { log } from '../utils/logger.js';
 import { userService } from '../services/userService.js';
 import { premiumService } from '../services/premiumService.js';
+import { buildGroupKey, buildPrivateKey } from '../services/memoryService.js';
 import { bus } from '../server/events.js';
 import { persistInboundMessage, persistOutboundMessage } from '../services/messageService.js';
 import {
@@ -993,8 +994,10 @@ export class BotHandler {
       await this.socket.sendPresenceUpdate('composing', to).catch(() => {});
 
       let fullResponse = '';
+      // Namespaced key: tiap (grup, sender) punya history sendiri + TTL grup.
+      // toolContext.sessionId/userId tetap JID mentah (dipakai logging/tools).
       await aiService.default.chatWithTools(
-        userId,
+        buildGroupKey(to, userId),
         aiPromptMessage,
         groupPrompt,
         async (chunk) => {
@@ -1118,7 +1121,7 @@ export class BotHandler {
 
       let fullResponse = '';
       await aiService.default.chatWithTools(
-        userId,
+        buildPrivateKey(userId),
         aiPromptMessage,
         systemPrompt,
         async (chunk) => {

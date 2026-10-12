@@ -1,6 +1,7 @@
 import type { CommandModule } from "../../types/index.js";
 import type { ToolContext } from "../../types/tools.js";
 import aiService, { AIService } from "../../services/aiService.js";
+import { buildPrivateKey } from "../../services/memoryService.js";
 import { isOwner } from "../../config/botConfig.js";
 import { resolvePrivateRole } from "../../services/roleService.js";
 import { getSystemPrompt } from "../../services/systemPrompt.js";
@@ -35,7 +36,7 @@ const AICommand: CommandModule = {
     }
 
     if (args[0]?.toLowerCase() === "off") {
-      aiService.clearConversation(userId);
+      aiService.clearConversation(buildPrivateKey(userId));
       await setAIModeEnabled(userId, false);
       await context.socket.sendMessage(context.fromJid, {
         text: "❌ Mode AI dinonaktifkan. Kembali ke mode perintah normal.",
@@ -59,7 +60,7 @@ const AICommand: CommandModule = {
     }
 
     if (args[0]?.toLowerCase() === "clear") {
-      aiService.clearConversation(userId);
+      aiService.clearConversation(buildPrivateKey(userId));
       await context.socket.sendMessage(context.fromJid, {
         text: "🧹 Percakapan AI dibersihkan.",
       });
@@ -159,7 +160,7 @@ ${isOwner(userId) ? `• ${context.simplified?.prefix || "!"}ai model <nama mode
 
       let responseBuffer = "";
       await aiService.chatWithTools(
-        userId,
+        buildPrivateKey(userId),
         aiPrompt,
         getSystemPrompt(resolvePrivateRole(userId, context.simplified?.participant || undefined)),
         (chunk) => {
@@ -207,11 +208,11 @@ export function handleAIMessage(
   userId: string,
   message: string,
 ): Promise<string> {
-  return aiService.chat(userId, message, getSystemPrompt(resolvePrivateRole(userId)));
+  return aiService.chat(buildPrivateKey(userId), message, getSystemPrompt(resolvePrivateRole(userId)));
 }
 
 export function clearAISession(userId: string): void {
-  aiService.clearConversation(userId);
+  aiService.clearConversation(buildPrivateKey(userId));
   setAIModeEnabled(userId, false);
 }
 

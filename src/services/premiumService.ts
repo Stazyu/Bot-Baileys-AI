@@ -40,6 +40,22 @@ export function todayKey(): string {
   return jakarta.toISOString().slice(0, 10);
 }
 
+// ─── Persistent memory (AiMemory) config ───────────────────────────────
+// Defaults: free = 0 (no persistence), premium = 7d, pro = 30d, cap 24 turns.
+// Overridable at runtime via BotConfig — same pattern as tier limit overrides.
+export const MEMORY_TTL_KEYS: Record<string, string> = {
+  'memory:ttl:free': 'free',
+  'memory:ttl:premium': 'premium',
+  'memory:ttl:pro': 'pro',
+};
+export const MEMORY_MAX_TURNS_KEY = 'memory:max_turns';
+export const DEFAULT_MEMORY_TTL_DAYS: Record<string, number> = {
+  free: 0,
+  premium: 7,
+  pro: 30,
+};
+export const DEFAULT_MEMORY_MAX_TURNS = 24;
+
 type ToggleKey = 'privateAi' | 'groupAi' | 'command';
 const TOGGLE_CONFIG_KEYS: Record<ToggleKey, string> = {
   privateAi: 'premium:enforce_private_ai_limit',
@@ -55,6 +71,8 @@ class PremiumService {
   private enforceCommandLimit: boolean = true;
   private initialized: boolean = false;
   private tierOverrides: Record<string, Partial<TierConfig>> = {};
+  private memoryTtlOverrides: Record<string, number> = {};
+  private memoryMaxTurns: number = DEFAULT_MEMORY_MAX_TURNS;
 
   constructor() {
     this.cache = new NodeCache({ stdTTL: this.USAGE_CACHE_TTL_SEC, checkperiod: 120 });
@@ -72,8 +90,9 @@ class PremiumService {
         if (cfg.key === TOGGLE_CONFIG_KEYS.command) this.enforceCommandLimit = enabled;
       }
       await this.reloadTiers();
+      await this.reloadMemoryConfig();
       this.initialized = true;
-      log.info(`🔒 [PremiumService] Init — PrivateAI: ${this.enforcePrivateAiLimit}, GroupAI: ${this.enforceGroupAiLimit}, Cmd: ${this.enforceCommandLimit}`);
+      log.info(`🔒 [PremiumService] Init — PrivateAI: ${this.enforcePrivateAiLimit}, GroupAI: ${this.enforceGroupAiLimit}, Cmd: ${this.enforceCommandLimit}, MemTTL: ${JSON.stringify(this.getAllMemoryTtl())}, MemTurns: ${this.memoryMaxTurns}`);
     } catch (error) {
       log.error('[PremiumService] Failed to load toggle flags, using defaults:', error as object);
       this.initialized = true;
@@ -96,6 +115,66 @@ class PremiumService {
       this.tierOverrides = overrides;
     } catch (error) {
       log.debug(`[PremiumService] Non-critical: tier reload failed: ${(error as Error).message}`);
+    }
+  }
+
+  /** Baca ulang durasi memory + max turns dari BotConfig tanpa restart. */
+  async reloadMemoryConfig(): Promise<void> {
+    try {
+      const keys = [...Object.keys(MEMORY_TTL_KEYS), MEMORY_MAX_TURNS_KEY];
+      const rows = await prisma.botConfig.findMany({ where: { key: { in: keys } } });
+      for (const row of rows) {
+        const value = Number(row.value);
+        if (!Number.isFinite(value) || value < 0) continue;
+        if (row.key === MEMORY_MAX_TURNS_KEY) {
+          if (value >= 1) this.memoryMaxTurns = Math.floor(value);
+          continue;
+        }
+        const tier = MEMORY_TTL_KEYS[row.key];
+        if (tier) this.memoryTtlOverrides[tier] = Math.floor(value);
+      }
+    } catch (error) {
+      log.debug(`[PremiumService] Non-critical: memory config reload failed: ${(error as Error).message}`);
+    }
+  }
+
+  /** Durasi memory persisten (hari) untuk tier. 0 = tidak persisten (free). */
+  getMemoryTtlDays(tier: string): number {
+    const override = this.memoryTtlOverrides[tier];
+    if (override !== undefined) return override;
+    return DEFAULT_MEMORY_TTL_DAYS[tier] ?? DEFAULT_MEMORY_TTL_DAYS.free;
+  }
+
+  getAllMemoryTtl(): Record<string, number> {
+    const merged: Record<string, number> = { ...DEFAULT_MEMORY_TTL_DAYS };
+    for (const [tier, days] of Object.entries(this.memoryTtlOverrides)) {
+      merged[tier] = days;
+    }
+    return merged;
+  }
+
+  getMemoryMaxTurns(): number {
+    return this.memoryMaxTurns;
+  }
+
+  async setMemoryTtlDays(tier: string, days: number): Promise<void> {
+    if (!MEMORY_TTL_KEYS[`memory:ttl:${tier}`]) return;
+    this.memoryTtlOverrides[tier] = Math.floor(days);
+    try {
+      const key = `memory:ttl:${tier}`;
+      await prisma.botConfig.upsert({ where: { key }, create: { key, value: String(Math.floor(days)) }, update: { value: String(Math.floor(days)) } });
+    } catch (error) {
+      log.error(`[PremiumService] Failed to save memory TTL ${tier}:`, error as object);
+    }
+  }
+
+  async setMemoryMaxTurns(turns: number): Promise<void> {
+    if (!Number.isFinite(turns) || turns < 1) return;
+    this.memoryMaxTurns = Math.floor(turns);
+    try {
+      await prisma.botConfig.upsert({ where: { key: MEMORY_MAX_TURNS_KEY }, create: { key: MEMORY_MAX_TURNS_KEY, value: String(Math.floor(turns)) }, update: { value: String(Math.floor(turns)) } });
+    } catch (error) {
+      log.error('[PremiumService] Failed to save memory max turns:', error as object);
     }
   }
 
