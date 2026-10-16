@@ -5,6 +5,7 @@ import type {
 } from '../../types/tools.js';
 import warningService, {
   MAX_WARNINGS,
+  buildWarningListMessage,
   resolveParticipant,
   formatParticipantDisplay,
   getGroupMetadataSafely,
@@ -17,20 +18,20 @@ export const definition: AIToolDefinition = {
   function: {
     name: 'group_warning',
     description:
-      'Beri peringatan (warning) kepada member grup yang melanggar aturan, kurangi peringatan (unwarn), reset peringatan, atau cek status peringatan. Peringatan otomatis bertambah 1 jika level tidak diisi (1 -> 2 -> 3). Jika peringatan mencapai 3, member akan otomatis dikeluarkan (kick) dari grup. Hanya admin grup atau owner bot yang diperbolehkan memberi atau menghapus peringatan.',
+      'Beri peringatan (warning) kepada member grup yang melanggar aturan, kurangi peringatan (unwarn), reset peringatan, cek status peringatan, atau tampilkan daftar semua member yang kena peringatan (list). Peringatan otomatis bertambah 1 jika level tidak diisi (1 -> 2 -> 3). Jika peringatan mencapai 3, member akan otomatis dikeluarkan (kick) dari grup. Hanya admin grup atau owner bot yang diperbolehkan memberi atau menghapus peringatan.',
     parameters: {
       type: 'object',
       properties: {
         target: {
           type: 'string',
           description:
-            'Target member yang ingin diperingatkan/dicek. Bisa berupa mention (@member), nomor telepon (misal "628123456789"), LID, atau nama member di grup.',
+            'Target member yang ingin diperingatkan/dicek. Bisa berupa mention (@member), nomor telepon (misal "628123456789"), LID, atau nama member di grup. Wajib diisi untuk warn/unwarn/reset/check; kosongkan (atau isi "-") untuk action "list".',
         },
         action: {
           type: 'string',
           description:
-            'Aksi peringatan: "warn" (beri peringatan, default), "unwarn" (kurangi 1 peringatan), "reset" (hapus semua peringatan), atau "check" (cek jumlah peringatan member).',
-          enum: ['warn', 'unwarn', 'reset', 'check'],
+            'Aksi peringatan: "warn" (beri peringatan, default), "unwarn" (kurangi 1 peringatan), "reset" (hapus semua peringatan), "check" (cek jumlah peringatan satu member), atau "list" (tampilkan SEMUA member yang kena peringatan di grup ini — dipakai saat user bertanya "siapa aja yang kena peringatan/list warning").',
+          enum: ['warn', 'unwarn', 'reset', 'check', 'list'],
         },
         reason: {
           type: 'string',
@@ -43,7 +44,7 @@ export const definition: AIToolDefinition = {
             'Tingkat peringatan yang ditentukan secara eksplisit (1, 2, atau 3). Jika dikosongkan, bot otomatis menaikkan peringatan member dari hitungan saat ini. Jika level mencapai 3, member langsung di-kick.',
         },
       },
-      required: ['target'],
+      required: [],
     },
   },
 };
@@ -109,7 +110,7 @@ export const execute: ToolExecuteFunction = async (args, context): Promise<ToolE
     }
   }
 
-  if (!targetInput || isBotJid(targetInput)) {
+  if (action !== 'list' && (!targetInput || isBotJid(targetInput))) {
     return {
       success: false,
       message: 'Target member tidak jelas atau berupa bot itu sendiri. Mohon sebutkan atau mention member yang ingin diperingatkan.',
@@ -120,6 +121,34 @@ export const execute: ToolExecuteFunction = async (args, context): Promise<ToolE
   const adminLid = context.callerLid;
 
   try {
+    // ── List: semua member yang kena peringatan di grup ini (+ tag) ──
+    if (action === 'list') {
+      const metadata = await getGroupMetadataSafely(socket, groupId, context.waSessionId);
+      const records = await warningService.getGroupWarnings(groupId);
+
+      if (records.length === 0) {
+        return {
+          success: true,
+          message: '✨ Tidak ada member yang memiliki peringatan aktif di grup ini.',
+          data: { count: 0, mentions: [] as string[] },
+        };
+      }
+
+      // Helper resolve ulang ke partisipan saat ini agar mentions selalu fresh
+      // (LID/PN bisa berubah); yang sudah keluar grup fallback ke userId tersimpan.
+      const { text: listText, mentions } = buildWarningListMessage(records, metadata.participants);
+      await socket.sendMessage(groupId, {
+        text: listText,
+        mentions,
+      });
+
+      return {
+        success: true,
+        message: listText,
+        data: { count: records.length, mentions },
+      };
+    }
+
     if (action === 'check') {
       const metadata = await getGroupMetadataSafely(socket, groupId, context.waSessionId);
       const found = resolveParticipant(metadata.participants, targetInput, context.quotedParticipant);

@@ -65,16 +65,16 @@ COPY --from=builder /app/prisma ./prisma
 
 ENV NODE_ENV=production
 
+# Session autoload filter: skip 'dev' by default in the container.
+# Override at runtime: docker run -e EXCLUDE_SESSIONS="" <image>  (load all)
+#                   or: docker run -e EXCLUDE_SESSIONS="dev,staging" <image>
+ENV EXCLUDE_SESSIONS="dev"
+
 # Dashboard API (Fastify, same process as the bot). Port follows $PORT (default 3001).
 EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 
-# ─── Session autoload filter ─────────────────────────────────────────
-# Default: load ALL sessions that have credentials in the DB (dashboard lists all).
-# To restrict, set at runtime (never bake into the image):
-#   docker run -e INCLUDE_SESSIONS="prod" ...        (prod only)
-#   docker run -e EXCLUDE_SESSIONS="dev" ...         (everything except dev)
 # ─── Instagram Cookies (yt-dlp) ──────────────────────────────────────
 # On Coolify / Docker, mount cookies.txt as a file mount:
 #   Host path:  /var/coolify/cookies.txt (or the path of your uploaded file)
@@ -87,8 +87,9 @@ ENV INSTAGRAM_DL_COOKIES=/app/cookies.txt
 # Use tini as PID 1 for proper signal forwarding (SIGINT/SIGTERM)
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
-# Default: run all non-dev sessions from DB
+# Default: run all sessions from DB except EXCLUDE_SESSIONS (="dev")
 # Override at runtime:
-#   docker run <image> npm run start:dev      -> only dev session
+#   docker run -e EXCLUDE_SESSIONS="" <image>          -> load all sessions
+#   docker run -e INCLUDE_SESSIONS="prod" <image>      -> only prod (wins over exclude)
 #   docker run <image> npm run start:new -- --session=foo --force-clear
 CMD ["node", "dist/index.js"]

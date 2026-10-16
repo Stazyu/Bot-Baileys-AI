@@ -1,4 +1,5 @@
 import aiService from './aiService.js';
+import { buildPrivateKey } from './memoryService.js';
 import type { ToolContext } from '../types/tools.js';
 import { getSystemPrompt } from './systemPrompt.js';
 import { resolvePrivateRole } from './roleService.js';
@@ -61,12 +62,12 @@ export class AIModeHandler {
     const systemWithHistory = `${getSystemPrompt(resolvePrivateRole(userId, toolContext?.callerLid))}\n\nRiwayat percakapan:\n${historyMessages}`;
 
     // Clear internal history so chatWithTools starts fresh with our custom system prompt
-    aiService.clearConversation(userId);
+    aiService.clearConversation(buildPrivateKey(userId));
 
     // Use chatWithTools for function calling support (social media downloads, etc.)
     let response = '';
     await aiService.chatWithTools(
-      userId,
+      buildPrivateKey(userId),
       userMessage,
       systemWithHistory,
       (chunk) => {

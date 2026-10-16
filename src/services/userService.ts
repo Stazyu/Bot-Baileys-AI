@@ -8,6 +8,7 @@ export interface UserRecord {
   sessionId: string | null;
   tier: string;
   premiumExpiry: Date | null;
+  memoryTtlDays: number | null;
   status: string;
   isBlocked: boolean;
   firstSeen: Date;
@@ -104,6 +105,16 @@ class UserService {
     }
   }
 
+  async setMemoryTtl(userId: string, days: number | null): Promise<void> {
+    try {
+      await prisma.user.update({ where: { userId }, data: { memoryTtlDays: days } });
+      this.cache.del(this.cacheKey(userId));
+      log.info(`[UserService] User ${userId} memory TTL set to ${days === null ? 'default-tier' : `${days}d`}`);
+    } catch (error) {
+      log.error(`[UserService] Failed to set memory TTL for ${userId}:`, error as object);
+    }
+  }
+
   async setTier(userId: string, tier: string, expiry?: Date): Promise<void> {
     try {
       await prisma.user.update({ where: { userId }, data: { tier, premiumExpiry: expiry ?? null } });
@@ -146,6 +157,7 @@ class UserService {
       sessionId: user.sessionId ?? null,
       tier: user.tier ?? 'free',
       premiumExpiry: user.premiumExpiry ?? null,
+      memoryTtlDays: user.memoryTtlDays ?? null,
       status: user.status ?? 'active',
       isBlocked: user.isBlocked ?? false,
       firstSeen: user.firstSeen,

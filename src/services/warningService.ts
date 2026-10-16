@@ -250,6 +250,63 @@ export function getParticipantMentions(participant: GroupParticipant): string[] 
 }
 
 /**
+ * Build the warning-list message text + mentions (pure, unit-testable).
+ *
+ * Members still in the group resolve to fresh JIDs so the @tags actually
+ * mention them; records whose owner already left fall back to the stored
+ * userId and are marked "sudah keluar grup".
+ */
+export function buildWarningListMessage(
+  records: WarningRecord[],
+  participants: GroupParticipant[]
+): { text: string; mentions: string[] } {
+  const mentionList: string[] = [];
+  let listText = `📋 *DAFTAR PERINGATAN MEMBER (${records.length})*\n\n`;
+
+  records.forEach((rec, idx) => {
+    const found = resolveParticipant(participants, rec.userId);
+    if (found) {
+      const display = formatParticipantDisplay(found);
+      mentionList.push(...getParticipantMentions(found));
+      listText += `${idx + 1}. @${display} — [${rec.count}/${MAX_WARNINGS}]\n`;
+    } else {
+      const display = rec.userId.split('@')[0];
+      mentionList.push(rec.userId);
+      listText += `${idx + 1}. @${display} — [${rec.count}/${MAX_WARNINGS}] (sudah keluar grup)\n`;
+    }
+  });
+
+  return { text: listText, mentions: Array.from(new Set(mentionList)) };
+}
+
+/**
+ * Ambil semua @angka (7+ digit) dari teks — dipakai untuk mengubah tag
+ * tulisan AI (mis. daftar warning) menjadi mentions WhatsApp asli.
+ */
+export function extractTagDigits(text: string): string[] {
+  return Array.from(new Set([...text.matchAll(/@(\d{7,})/g)].map((m) => m[1])));
+}
+
+/**
+ * Resolve @angka di teks balasan menjadi JID mentions yang valid.
+ *
+ * Tiap digit dicocokkan ke partisipan grup (id/lid/phoneNumber) agar tag-nya
+ * beneran nge-tag; yang tidak cocok fallback ke `<digit>@s.whatsapp.net`.
+ */
+export function resolveTagMentions(digits: string[], participants: GroupParticipant[]): string[] {
+  const out: string[] = [];
+  for (const d of digits) {
+    const found = resolveParticipant(participants, d);
+    if (found) {
+      out.push(...getParticipantMentions(found));
+    } else {
+      out.push(`${d}@s.whatsapp.net`);
+    }
+  }
+  return Array.from(new Set(out));
+}
+
+/**
  * Fetch group metadata with caching and reconnection fallback.
  */
 export async function getGroupMetadataSafely(

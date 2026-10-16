@@ -13,6 +13,7 @@ import toolRegistry from "../tools/toolRegistry.js";
 import type { VisionImage } from "../utils/vision.js";
 import type { ToolContext, ToolExecuteResult } from "../types/tools.js";
 import { persistToolCall } from "./toolLogService.js";
+import { memoryService, parseMemoryKey } from "./memoryService.js";
 import {
   containsToolCallArtifact,
   stripToolCallArtifacts,
@@ -434,7 +435,7 @@ export class AIService {
       throw new Error(this.getNotConfiguredMessage());
     }
 
-    const messages = this.getConversationHistory(sessionId);
+    const messages = await this.getOrLoadHistory(sessionId);
 
     if (systemPrompt) {
       this.upsertSystemPrompt(messages, systemPrompt);
@@ -492,7 +493,7 @@ export class AIService {
       throw new Error(this.getNotConfiguredMessage());
     }
 
-    const messages = this.getConversationHistory(sessionId);
+    const messages = await this.getOrLoadHistory(sessionId);
 
     if (systemPrompt) {
       this.upsertSystemPrompt(messages, systemPrompt);
@@ -528,7 +529,7 @@ export class AIService {
       return this.chatStream(sessionId, userMessage, systemPrompt, onChunk, images);
     }
 
-    const messages = this.getConversationHistory(sessionId);
+    const messages = await this.getOrLoadHistory(sessionId);
 
     if (systemPrompt) {
       this.upsertSystemPrompt(messages, systemPrompt);
@@ -996,12 +997,43 @@ export class AIService {
     return this.conversationCache.get<ChatMessage[]>(sessionId) || [];
   }
 
-  clearConversation(sessionId: string): void {
+  /**
+   * L1 hit → langsung pakai. L1 miss → lazy-load L2 dari Mongo (hanya tier
+   * bayar yang punya row; free langsung mulai kosong). Hasil load di-seed
+   * kembali ke L1 agar chat berikutnya tidak menyentuh DB lagi.
+   */
+  private async getOrLoadHistory(sessionId: string): Promise<ChatMessage[]> {
+    const cached = this.conversationCache.get<ChatMessage[]>(sessionId);
+    if (cached) return cached;
+    try {
+      const { userId, scope, isGroup } = parseMemoryKey(sessionId);
+      const stored = await memoryService.load(userId, scope);
+      if (stored && stored.length > 0) {
+        const messages = stored as unknown as ChatMessage[];
+        this.conversationCache.set(
+          sessionId,
+          messages,
+          isGroup ? this.GROUP_TTL_SEC : this.PRIVATE_TTL_SEC,
+        );
+        return messages;
+      }
+    } catch {
+      // L2 gagal → mulai kosong (degradasi anggun ke perilaku lama).
+    }
+    return [];
+  }
+
+  clearConversation(sessionId: string, persistent = true): void {
     this.conversationCache.del(sessionId);
+    if (persistent) {
+      // L2 ikut dihapus (fire-and-forget; free tidak punya row = no-op).
+      const { userId, scope } = parseMemoryKey(sessionId);
+      void memoryService.clear(userId, scope);
+    }
   }
 
   private isGroupSession(sessionId: string): boolean {
-    return sessionId.includes("@g.us");
+    return sessionId.startsWith("mem:group:") || sessionId.includes("@g.us");
   }
 
   /**
@@ -1020,6 +1052,11 @@ export class AIService {
       ? this.GROUP_TTL_SEC
       : this.PRIVATE_TTL_SEC;
     this.conversationCache.set(sessionId, this.pruneVisionHistory(messages), ttl);
+    // L2 persisten (fire-and-forget; save() no-op untuk free/TTL 0).
+    // setConversation hanya dipanggil setelah turn sukses, jadi yang tersimpan
+    // tidak pernah history yang teracuni kegagalan upstream.
+    const { userId, scope } = parseMemoryKey(sessionId);
+    void memoryService.save(userId, scope, messages);
   }
 
   /**

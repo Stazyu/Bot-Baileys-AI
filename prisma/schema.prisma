@@ -92,6 +92,7 @@ model User {
   sessionId      String?
   tier           String      @default("free")
   premiumExpiry  DateTime?
+  memoryTtlDays  Int?
   status         String      @default("active")
   isBlocked      Boolean     @default(false)
   aiModeEnabled  Boolean     @default(false)
@@ -201,5 +202,19 @@ model GroupWarning {
   @@unique([groupId, userId])
   @@index([groupId])
   @@index([userId])
+}
+
+// ─── AI Persistent Memory (premium/pro) ───────────────────────────
+model AiMemory {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String
+  scope     String
+  messages  Json
+  summary   String?
+  expiresAt DateTime
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, scope])
+  @@index([expiresAt])
 }
 
