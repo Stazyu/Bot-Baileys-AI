@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import prisma from '../../database/prisma.js';
 import { todayKey } from '../../services/premiumService.js';
+import { groupTierService } from '../../services/groupTierService.js';
 import sessionManager from '../../session/sessionManager.js';
 import { parseQuery } from '../validate.js';
 
@@ -35,11 +36,12 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
     if (statsCache && Date.now() - statsCache.at < CACHE_MS) return statsCache.data;
     const mem = sessionManager.getStats();
     const todayStart = localDayBounds(0).start;
-    const [activeSessions, registeredUsers, messagesToday, aiRows] = await Promise.all([
+    const [activeSessions, registeredUsers, messagesToday, aiRows, groupTierStats] = await Promise.all([
       prisma.waSession.count({ where: { status: 'connected' } }).catch(() => mem.inMemory),
       prisma.user.count(),
       prisma.message.count({ where: { createdAt: { gte: todayStart } } }),
       prisma.usageLog.findMany({ where: { date: todayKey() }, select: { aiChatCount: true } }),
+      groupTierService.getStats(),
     ]);
     const aiCallsToday = aiRows.reduce((sum, row) => sum + row.aiChatCount, 0);
 
@@ -76,6 +78,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
       registeredUsers,
       messagesToday,
       aiCallsToday,
+      groupTiers: groupTierStats,
       sparks: { sessions: sparkSessions, users: sparkUsers, messages: sparkMessages, ai: sparkAi },
     };
     statsCache = { at: Date.now(), data };

@@ -679,14 +679,21 @@ export class BotHandler {
 
           if ((isBotMentioned || isReplyToBot || isCalled || tagAll) && isAIGroupEnabled(from)) {
             // ── Daily limit: group AI ─────────────────────────────────
+            // Grup ber-tier (diaktifkan user premium/pro) → pool se-grup.
+            // Grup biasa → limit per user (perilaku lama, tidak berubah).
+            let usageScope: 'group' | 'user' = 'user';
             if (user_id && !isOwner(user_id) && premiumService.isGroupAiLimitEnabled()) {
-              const groupAiCheck = await premiumService.checkGroupAiLimit(user_id);
+              const groupAiCheck = await premiumService.checkGroupAiLimitScoped(user_id, from);
+              usageScope = groupAiCheck.scope;
               if (!groupAiCheck.allowed) {
-                const tierMsg = groupAiCheck.tier === 'free'
-                  ? `\n\n💡 Upgrade ke premium untuk mendapatkan 500 group AI chat/hari: ketik *!premium check*`
-                  : `\n\n💡 Kamu masih bisa upgrade ke tier lebih tinggi untuk menambah limit.`;
+                const tierMsg = groupAiCheck.scope === 'group'
+                  ? `\n\n💡 Kuota AI grup ini dipakai bersama semua member. Owner grup bisa upgrade tier grup: ketik *!grouptier*.`
+                  : groupAiCheck.tier === 'free'
+                    ? `\n\n💡 Upgrade ke premium untuk mendapatkan 500 group AI chat/hari: ketik *!premium check*`
+                    : `\n\n💡 Kamu masih bisa upgrade ke tier lebih tinggi untuk menambah limit.`;
+                const subject = groupAiCheck.scope === 'group' ? 'Grup ini' : 'Kamu';
                 await this.socket.sendMessage(from, {
-                  text: `❌ Limit group AI harian kamu habis (${groupAiCheck.limit}/hari). Coba lagi besok.${tierMsg}`,
+                  text: `❌ Limit group AI harian ${subject.toLowerCase()} habis (${groupAiCheck.limit}/hari). Coba lagi besok.${tierMsg}`,
                 });
                 return;
               }
@@ -700,7 +707,7 @@ export class BotHandler {
               }
             }
             log.info(`[${this.sessionId}] 🤖 Group auto-reply triggered for: ${from}`);
-            await this.handleGroupAutoReply(simplified, from, message);
+            await this.handleGroupAutoReply(simplified, from, message, usageScope);
             return;
           }
         } catch (error) {
@@ -919,7 +926,7 @@ export class BotHandler {
     return image ? [image] : null;
   }
 
-  private async handleGroupAutoReply(simplified: SimplifiedMessage, to: string, originalMessage: WAMessage): Promise<void> {
+  private async handleGroupAutoReply(simplified: SimplifiedMessage, to: string, originalMessage: WAMessage, usageScope: 'group' | 'user' = 'user'): Promise<void> {
     try {
       let message = simplified.message || simplified.body || '';
 
@@ -1023,7 +1030,10 @@ export class BotHandler {
       await this.socket.sendPresenceUpdate('paused', to).catch(() => {});
 
       // ── Increment group AI usage ─────────────────────────────────
-      if (simplified.user_id) {
+      // Pool grup: 1 counter per grup/hari. Per-user: seperti sebelumnya.
+      if (usageScope === 'group') {
+        premiumService.incrementGroupPoolUsage(to).catch(() => {});
+      } else if (simplified.user_id) {
         premiumService.incrementGroupAiUsage(simplified.user_id).catch(() => {});
       }
 

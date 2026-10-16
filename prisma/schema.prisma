@@ -204,6 +204,40 @@ model GroupWarning {
   @@index([userId])
 }
 
+// ─── Group Tier (premium/pro user mengaktifkan 1 grup) ────────────
+// Tier grup adalah "kembar" dari tier user pengaktif: limit yang dipakai
+// sama dengan tier tersebut (mirror), tapi counter-nya milik GRUP (pool
+// bersama), bukan per member. `expiresAt` mencerminkan premiumExpiry
+// owner; kalau owner turun tier / expired, grup ikut turun (lazy, saat check).
+model GroupTier {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  groupJid    String    @unique
+  ownerJid    String
+  tier        String    @default("premium")
+  activatedAt DateTime  @default(now())
+  expiresAt   DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  @@index([ownerJid])
+  @@index([tier])
+  @@index([expiresAt])
+}
+
+// Pool harian per grup (hanya grup ber-tier yang memakai ini).
+// Grup tanpa tier tetap memakai UsageLog[userId] seperti sebelumnya.
+model GroupUsageLog {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  groupJid     String
+  date         String
+  groupAiCount Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([groupJid, date])
+  @@index([groupJid])
+  @@index([date])
+}
+
 // ─── AI Persistent Memory (premium/pro) ───────────────────────────
 model AiMemory {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId

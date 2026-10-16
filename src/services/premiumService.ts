@@ -2,6 +2,7 @@ import NodeCache from 'node-cache';
 import prisma from '../database/prisma.js';
 import userService from './userService.js';
 import { log } from '../utils/logger.js';
+import groupTierService from './groupTierService.js';
 
 export interface TierConfig {
   name: string;
@@ -200,6 +201,75 @@ class PremiumService {
     return this.checkLimit(userId, 'groupAiCount', 'dailyGroupAiLimit');
   }
 
+  /**
+   * Limit AI grup dengan resolusi scope: kalau grup punya tier (diaktifkan
+   * user premium/pro) → pakai POOL GRUP (counter se-grup, limit tier kembar).
+   * Kalau tidak → fallback ke limit PER USER seperti sebelumnya.
+   *
+   * `scope` dikembalikan supaya pemanggil tahu counter mana yang harus
+   * di-increment (jangan sampai cek pool tapi increment per-user).
+   */
+  async checkGroupAiLimitScoped(userId: string, groupJid: string): Promise<LimitCheckResult & { scope: 'group' | 'user' }> {
+    const tier = await groupTierService.getGroupTier(groupJid);
+    if (!tier) {
+      const result = await this.checkGroupAiLimit(userId);
+      return { ...result, scope: 'user' };
+    }
+    const result = await this.checkGroupPoolLimit(groupJid, tier);
+    return { ...result, scope: 'group' };
+  }
+
+  /** Cek pool harian grup ber-tier. Counter-nya milik grup, bukan member. */
+  async checkGroupPoolLimit(groupJid: string, tier?: string): Promise<LimitCheckResult> {
+    try {
+      const resolvedTier = tier ?? (await groupTierService.getGroupTier(groupJid)) ?? 'free';
+      const limit = this.getTierConfig(resolvedTier).dailyGroupAiLimit;
+      if (limit === Number.MAX_SAFE_INTEGER) {
+        return { allowed: true, remaining: Infinity, limit, tier: resolvedTier };
+      }
+      const used = await this.getGroupPoolUsage(groupJid);
+      if (used >= limit) {
+        return { allowed: false, remaining: 0, limit, tier: resolvedTier };
+      }
+      return { allowed: true, remaining: limit - used, limit, tier: resolvedTier };
+    } catch (error) {
+      log.debug(`[PremiumService] Group pool check failed, allowing: ${(error as Error).message}`);
+      return { allowed: true, remaining: 1, limit: 1, tier: 'free' };
+    }
+  }
+
+  async getGroupPoolUsage(groupJid: string, date?: string): Promise<number> {
+    const today = date ?? todayKey();
+    const cacheKey = this.groupUsageCacheKey(groupJid, today);
+    const cached = this.cache.get<number>(cacheKey);
+    if (cached !== undefined) return cached;
+    try {
+      const usage = await prisma.groupUsageLog.findUnique({
+        where: { groupJid_date: { groupJid, date: today } },
+      });
+      const count = usage?.groupAiCount ?? 0;
+      this.cache.set(cacheKey, count);
+      return count;
+    } catch (error) {
+      log.debug(`[PremiumService] Failed to get group pool usage: ${(error as Error).message}`);
+      return 0;
+    }
+  }
+
+  async incrementGroupPoolUsage(groupJid: string): Promise<void> {
+    try {
+      const today = todayKey();
+      await prisma.groupUsageLog.upsert({
+        where: { groupJid_date: { groupJid, date: today } },
+        create: { groupJid, date: today, groupAiCount: 1 },
+        update: { groupAiCount: { increment: 1 } },
+      });
+      this.cache.del(this.groupUsageCacheKey(groupJid, today));
+    } catch (error) {
+      log.debug(`[PremiumService] Non-critical: group pool increment failed: ${(error as Error).message}`);
+    }
+  }
+
   async checkCommandLimit(userId: string): Promise<LimitCheckResult> {
     return this.checkLimit(userId, 'commandCount', 'dailyCommandLimit');
   }
@@ -305,6 +375,10 @@ class PremiumService {
 
   private usageCacheKey(userId: string, date: string): string {
     return `usage:${userId}:${date}`;
+  }
+
+  private groupUsageCacheKey(groupJid: string, date: string): string {
+    return `gusage:${groupJid}:${date}`;
   }
 }
 

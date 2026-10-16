@@ -18,6 +18,7 @@ export interface DashboardStats {
   registeredUsers: number;
   messagesToday: number;
   aiCallsToday: number;
+  groupTiers?: { total: number; premium: number; pro: number };
   sparks: { sessions: number[]; users: number[]; messages: number[]; ai: number[] };
 }
 

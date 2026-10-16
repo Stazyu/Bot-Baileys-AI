@@ -2,6 +2,7 @@ import type { CommandModule, CommandContext } from '../../types/index.js';
 import { isOwner } from '../../config/botConfig.js';
 import { premiumService } from '../../services/premiumService.js';
 import { userService } from '../../services/userService.js';
+import { groupTierService } from '../../services/groupTierService.js';
 import { log } from '../../utils/logger.js';
 
 const command: CommandModule = {
@@ -239,6 +240,87 @@ const command: CommandModule = {
         break;
       }
 
+      case 'group': {
+        if (!isOwner(context.simplified?.user_id || from)) {
+          await context.socket.sendMessage(from, { text: '❌ Owner only.' });
+          return;
+        }
+        const action = args[1]?.toLowerCase();
+        const rawTarget = args[2];
+        const groupJid = rawTarget?.includes('@g.us')
+          ? rawTarget
+          : rawTarget
+            ? `${rawTarget}@g.us`
+            : null;
+
+        if (action === 'set') {
+          const tier = args[3]?.toLowerCase();
+          const ownerRaw = args[4];
+          const ownerJid = ownerRaw ? (ownerRaw.includes('@') ? ownerRaw : `${ownerRaw}@s.whatsapp.net`) : undefined;
+          if (!groupJid || !tier || !['free', 'premium', 'pro'].includes(tier)) {
+            await context.socket.sendMessage(from, {
+              text: '❌ Usage: `!premium group set <groupId|jid> <free|premium|pro> [ownerPhone]`\nContoh: `!premium group set 12036xxxxx@g.us premium 62812xxxx`',
+            });
+            return;
+          }
+          const result = await groupTierService.setGroupTier(groupJid, tier, ownerJid);
+          if (!result.ok) {
+            await context.socket.sendMessage(from, {
+              text: result.error === 'db_error'
+                ? '❌ Gagal menyimpan tier grup (DB error). Kalau grup baru, sertakan `[ownerPhone]` sebagai pemilik.'
+                : '❌ Tier tidak valid.',
+            });
+            return;
+          }
+          await context.socket.sendMessage(from, {
+            text: tier === 'free'
+              ? `🗑️ Tier grup \`${groupJid.split('@')[0]}\` dicabut → *FREE* (limit per-user).`
+              : `✅ Grup \`${groupJid.split('@')[0]}\` → tier *${tier.toUpperCase()}*`,
+          });
+          log.info(`[Premium] ${context.simplified?.user_id} set group ${groupJid} → ${tier}`);
+          return;
+        }
+
+        if (action === 'remove' || action === 'off') {
+          if (!groupJid) {
+            await context.socket.sendMessage(from, { text: '❌ Usage: `!premium group remove <groupId|jid>`' });
+            return;
+          }
+          const ok = await groupTierService.revokeGroup(groupJid);
+          await context.socket.sendMessage(from, {
+            text: ok ? `🗑️ Tier grup \`${groupJid.split('@')[0]}\` dicabut.` : '❌ Gagal mencabut tier grup.',
+          });
+          return;
+        }
+
+        if (!action || action === 'list') {
+          const list = await groupTierService.listGroupTiers();
+          if (list.length === 0) {
+            await context.socket.sendMessage(from, { text: '📋 Belum ada grup ber-tier.' });
+            return;
+          }
+          const lines = [`📋 *Grup Ber-tier (${list.length})*`, ''];
+          for (const rec of list.slice(0, 20)) {
+            const usage = await premiumService.getGroupPoolUsage(rec.groupJid);
+            const cfg = premiumService.getTierConfig(rec.tier);
+            const limitText = cfg.dailyGroupAiLimit === Number.MAX_SAFE_INTEGER ? '∞' : String(cfg.dailyGroupAiLimit);
+            lines.push(`• \`${rec.groupJid.split('@')[0]}\` — *${rec.tier.toUpperCase()}* — ${usage}/${limitText} — owner \`${rec.ownerJid.split('@')[0]}\``);
+          }
+          if (list.length > 20) lines.push(`...dan ${list.length - 20} lainnya`);
+          await context.socket.sendMessage(from, { text: lines.join('\n') });
+          return;
+        }
+
+        await context.socket.sendMessage(from, {
+          text: `📋 *Group Tier Commands* (owner)\n\n` +
+            `• \`!premium group list\` — daftar grup ber-tier\n` +
+            `• \`!premium group set <group> <tier> [ownerPhone]\` — paksa tier grup\n` +
+            `• \`!premium group remove <group>\` — cabut tier grup\n\n` +
+            `User premium/pro bisa self-service: \`!grouptier on <link>\``,
+        });
+        break;
+      }
+
       case 'status': {
         if (!isOwner(context.simplified?.user_id || from)) {
           await context.socket.sendMessage(from, { text: '❌ Owner only.' });
@@ -246,6 +328,7 @@ const command: CommandModule = {
         }
         const toggles = premiumService.getToggleStatus();
         const stats = await userService.getStats();
+        const groupStats = await groupTierService.getStats();
         const lines = [
           `⚙️ *Status Sistem Premium*`,
           ``,
@@ -260,6 +343,10 @@ const command: CommandModule = {
           `├ Free: ${stats.free}`,
           `├ Premium: ${stats.premium}`,
           `└ Pro: ${stats.pro}`,
+          ``,
+          `🏘️ *Tier Grup:*`,
+          `├ Premium: ${groupStats.premium}`,
+          `└ Pro: ${groupStats.pro}`,
         ];
         await context.socket.sendMessage(from, { text: lines.join('\n') });
         break;
@@ -272,6 +359,7 @@ const command: CommandModule = {
             `*!premium remove* <userId> — Reset ke free (owner)\n` +
             `*!premium check* [userId] — Cek tier & usage\n` +
             `*!premium list* — List user premium (owner)\n` +
+            `*!premium group* <list|set|remove> — Tier grup (owner)\n` +
             `*!premium toggle* <type> <on|off> — Toggle limit (owner)\n` +
             `*!premium status* — Status sistem (owner)\n` +
             `*!premium memory* <ttl|turns|set|check|clear> — Atur memory AI (owner)\n\n` +
