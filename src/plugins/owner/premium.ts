@@ -3,14 +3,37 @@ import { isOwner } from '../../config/botConfig.js';
 import { premiumService } from '../../services/premiumService.js';
 import { userService } from '../../services/userService.js';
 import { groupTierService } from '../../services/groupTierService.js';
+import {
+  computeExpiry,
+  daysRemaining,
+  describeExpiry,
+  isExpired,
+  parseDuration,
+  resolveEffectiveTier,
+} from '../../services/premiumExpiry.js';
 import { log } from '../../utils/logger.js';
+
+/** Alias pendek supaya pemakaian di dalam handler tetap ringkas. */
+const isPast = (date: Date): boolean => isExpired(date);
+
+/** Alasan kegagalan parse durasi → pesan yang bisa dibaca user. */
+const DURATION_ERRORS: Record<string, string> = {
+  durasi_kosong: 'Durasi kosong.',
+  format_tidak_valid: 'Format durasi tidak valid.',
+  satuan_tidak_dikenal: 'Satuan tidak dikenal (pakai d/hari, w/minggu, m/bulan, y/tahun).',
+  durasi_terlalu_kecil: 'Durasi minimal 1 hari.',
+  durasi_terlalu_besar: 'Durasi maksimal 3650 hari (±10 tahun).',
+};
+
+const DURATION_USAGE =
+  '📅 Format durasi: `30` (30 hari) · `2w` (2 minggu) · `1m` (30 hari) · `1y` (365 hari) · `off` (tanpa expiry)';
 
 const command: CommandModule = {
   config: {
     name: 'premium',
     aliases: ['upgrade', 'tier'],
     description: 'Manage premium tiers and limit toggles',
-    usage: '!premium <set|remove|check|list|toggle|status|memory>',
+    usage: '!premium <set|remove|check|list|toggle|status|memory|expiry|expiring>',
     category: 'owner',
     ownerOnly: true,
     cooldown: 2,
@@ -29,12 +52,116 @@ const command: CommandModule = {
         const targetJid = args[1]?.includes('@s.whatsapp.net') ? args[1] : `${args[1]}@s.whatsapp.net`;
         const tier = args[2]?.toLowerCase();
         if (!targetJid || !tier || !['free', 'premium', 'pro'].includes(tier)) {
-          await context.socket.sendMessage(from, { text: '❌ Usage: !premium set <userId|phone> <free|premium|pro>' });
+          await context.socket.sendMessage(from, {
+            text: `❌ Usage: \`!premium set <userId|phone> <free|premium|pro> [durasi]\`\n${DURATION_USAGE}\nContoh: \`!premium set 62812xxxx premium 30d\``,
+          });
           return;
         }
-        await userService.setTier(targetJid, tier);
-        await context.socket.sendMessage(from, { text: `✅ User *${targetJid.split('@')[0]}* di-set ke tier *${tier}*` });
-        log.info(`[Premium] ${context.simplified?.user_id} set ${targetJid} → ${tier}`);
+
+        // Durasi hanya relevan untuk tier berbayar. Tier free selalu tanpa expiry.
+        let expiry: Date | null = null;
+        if (tier === 'free') {
+          if (args[3]) {
+            await context.socket.sendMessage(from, { text: '❌ Tier *free* tidak punya masa aktif. Hapus argumen durasi.' });
+            return;
+          }
+        } else if (args[3]) {
+          const parsed = parseDuration(args[3]);
+          if (!parsed.ok) {
+            await context.socket.sendMessage(from, {
+              text: `❌ ${DURATION_ERRORS[parsed.error ?? ''] ?? 'Durasi tidak valid.'}\n${DURATION_USAGE}`,
+            });
+            return;
+          }
+          expiry = parsed.days === null ? null : computeExpiry(parsed.days);
+        }
+
+        // Guard: user harus ada di DB — `update` Prisma error kalau userId tak dikenal.
+        const existing = await userService.getUser(targetJid);
+        if (!existing) {
+          await context.socket.sendMessage(from, { text: `❌ User \`${targetJid.split('@')[0]}\` belum terdaftar di database.` });
+          return;
+        }
+
+        await userService.setTier(targetJid, tier, tier === 'free' ? null : expiry);
+        await context.socket.sendMessage(from, {
+          text:
+            `✅ User *${targetJid.split('@')[0]}* → tier *${tier.toUpperCase()}*\n` +
+            `└ Masa aktif: ${tier === 'free' ? '—' : describeExpiry(expiry)}`,
+        });
+        log.info(`[Premium] ${context.simplified?.user_id} set ${targetJid} → ${tier} (${expiry ? expiry.toISOString() : 'no-expiry'})`);
+        break;
+      }
+
+      case 'expiry': {
+        if (!isOwner(context.simplified?.user_id || from)) {
+          await context.socket.sendMessage(from, { text: '❌ Owner only.' });
+          return;
+        }
+        const targetJid = args[1]?.includes('@s.whatsapp.net') ? args[1] : args[1] ? `${args[1]}@s.whatsapp.net` : null;
+        if (!targetJid || !args[2]) {
+          await context.socket.sendMessage(from, {
+            text: `❌ Usage: \`!premium expiry <userId|phone> <durasi>\`\n${DURATION_USAGE}\nContoh: \`!premium expiry 62812xxxx +30\``,
+          });
+          return;
+        }
+        const user = await userService.getUser(targetJid);
+        if (!user) {
+          await context.socket.sendMessage(from, { text: `❌ User \`${targetJid.split('@')[0]}\` tidak ditemukan.` });
+          return;
+        }
+
+        // Prefiks `+` = perpanjang dari expiry lama (kalau masih aktif),
+        // bukan dari sekarang. Ini yang bikin top-up tidak memotong sisa masa.
+        const raw = args[2];
+        const extend = raw.startsWith('+');
+        const parsed = parseDuration(extend ? raw.slice(1) : raw);
+        if (!parsed.ok) {
+          await context.socket.sendMessage(from, {
+            text: `❌ ${DURATION_ERRORS[parsed.error ?? ''] ?? 'Durasi tidak valid.'}\n${DURATION_USAGE}`,
+          });
+          return;
+        }
+
+        let expiry: Date | null;
+        if (parsed.days === null) {
+          expiry = null;
+        } else {
+          const base = extend && user.premiumExpiry && !isPast(user.premiumExpiry) ? user.premiumExpiry : new Date();
+          expiry = computeExpiry(parsed.days, base);
+        }
+
+        await userService.setPremiumExpiry(targetJid, expiry);
+        await context.socket.sendMessage(from, {
+          text: `✅ Masa aktif *${targetJid.split('@')[0]}* → ${describeExpiry(expiry)}${extend ? ' (diperpanjang)' : ''}`,
+        });
+        log.info(`[Premium] ${context.simplified?.user_id} set expiry ${targetJid} → ${expiry ? expiry.toISOString() : 'none'}`);
+        break;
+      }
+
+      case 'expiring': {
+        if (!isOwner(context.simplified?.user_id || from)) {
+          await context.socket.sendMessage(from, { text: '❌ Owner only.' });
+          return;
+        }
+        const withinDays = Math.min(Math.max(Number(args[1]) || 7, 1), 365);
+        const users = await userService.getUsers({ limit: 200 });
+        const now = new Date();
+        const soon = users
+          .filter((u) => resolveEffectiveTier(u, now) !== 'free' && u.premiumExpiry)
+          .map((u) => ({ user: u, days: daysRemaining(u.premiumExpiry, now) }))
+          .filter((row) => row.days <= withinDays)
+          .sort((a, b) => a.days - b.days);
+
+        if (soon.length === 0) {
+          await context.socket.sendMessage(from, { text: `📋 Tidak ada premium yang habis dalam ${withinDays} hari.` });
+          return;
+        }
+        const lines = [`⏳ *Premium Habis ≤ ${withinDays} Hari (${soon.length})*`, ''];
+        for (const { user, days } of soon.slice(0, 25)) {
+          lines.push(`• \`${user.userId.split('@')[0]}\` — *${user.tier.toUpperCase()}* — ${days === 0 ? '*HARI INI*' : `${days} hari lagi`}`);
+        }
+        await context.socket.sendMessage(from, { text: lines.join('\n') });
         break;
       }
 
@@ -48,8 +175,8 @@ const command: CommandModule = {
           await context.socket.sendMessage(from, { text: '❌ Usage: !premium remove <userId|phone>' });
           return;
         }
-        await userService.setTier(targetJid, 'free');
-        await context.socket.sendMessage(from, { text: `✅ User *${targetJid.split('@')[0]}* di-reset ke *free*` });
+        await userService.setTier(targetJid, 'free', null);
+        await context.socket.sendMessage(from, { text: `✅ User *${targetJid.split('@')[0]}* di-reset ke *free* (masa aktif dihapus)` });
         break;
       }
 
@@ -65,16 +192,22 @@ const command: CommandModule = {
         }
         const tierConfig = premiumService.getTierConfig(user.tier);
         const usage = await premiumService.getTodayUsage(checkJid);
-        const statusDetail = user.tier === 'free' ? 'Pengguna Gratis' : 'Premium (no expiry)';
+        const effective = resolveEffectiveTier(user);
         const expiryLine = user.premiumExpiry
-          ? `├ Premium sampai: ${user.premiumExpiry.toLocaleDateString('id-ID')}`
-          : `├ Status: ${statusDetail}`;
+          ? `├ Premium sampai: ${describeExpiry(user.premiumExpiry)}`
+          : user.tier === 'free'
+            ? '├ Status: Pengguna Gratis'
+            : '├ Status: Premium (tanpa expiry)';
+        const driftLine = effective !== user.tier
+          ? [`├ ⚠️ Tier efektif: *${effective.toUpperCase()}* (masa aktif habis)`]
+          : [];
         const lines = [
           `📊 *Status User*`,
           `├ ID: \`${user.userId.split('@')[0]}\``,
           `├ Nama: ${user.pushName || '(tidak diketahui)'}`,
           `├ Tier: *${user.tier.toUpperCase()}*`,
           expiryLine,
+          ...driftLine,
           `├ Status: ${user.status}`,
           ``,
           `📈 *Pemakaian Hari Ini*`,
@@ -99,7 +232,12 @@ const command: CommandModule = {
         }
         const lines = [`📋 *User Premium (${premiumUsers.length})*`, ''];
         for (const u of premiumUsers.slice(0, 20)) {
-          lines.push(`• \`${u.userId.split('@')[0]}\` — *${u.tier.toUpperCase()}* (${u.pushName || '-'})`);
+          const expiryText = u.premiumExpiry
+            ? resolveEffectiveTier(u) === 'free'
+              ? ' ⚠️ habis'
+              : ` — ${daysRemaining(u.premiumExpiry)}h lagi`
+            : '';
+          lines.push(`• \`${u.userId.split('@')[0]}\` — *${u.tier.toUpperCase()}* (${u.pushName || '-'})${expiryText}`);
         }
         if (premiumUsers.length > 20) lines.push(`...dan ${premiumUsers.length - 20} lainnya`);
         await context.socket.sendMessage(from, { text: lines.join('\n') });
@@ -355,7 +493,9 @@ const command: CommandModule = {
       default:
         await context.socket.sendMessage(from, {
           text: `📋 *Premium Commands*\n\n` +
-            `*!premium set* <userId> <tier> — Set tier user (owner)\n` +
+            `*!premium set* <userId> <tier> [durasi] — Set tier + masa aktif (owner)\n` +
+            `*!premium expiry* <userId> <durasi|+durasi|off> — Atur/perpanjang masa aktif (owner)\n` +
+            `*!premium expiring* [hari] — Premium yang mau habis (owner)\n` +
             `*!premium remove* <userId> — Reset ke free (owner)\n` +
             `*!premium check* [userId] — Cek tier & usage\n` +
             `*!premium list* — List user premium (owner)\n` +
@@ -363,6 +503,7 @@ const command: CommandModule = {
             `*!premium toggle* <type> <on|off> — Toggle limit (owner)\n` +
             `*!premium status* — Status sistem (owner)\n` +
             `*!premium memory* <ttl|turns|set|check|clear> — Atur memory AI (owner)\n\n` +
+            `${DURATION_USAGE}\n` +
             `Tier: *free* (20/50/20) | *premium* (200/500/200) | *pro* (unlimited)\n` +
             `AI / Group AI / Command`,
         });

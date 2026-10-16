@@ -1,6 +1,8 @@
 import NodeCache from 'node-cache';
+import type { Prisma } from '@prisma/client';
 import prisma from '../database/prisma.js';
 import { log } from '../utils/logger.js';
+import { resolveEffectiveTier, normaliseTier, type TierName } from './premiumExpiry.js';
 
 export interface UserRecord {
   userId: string;
@@ -11,6 +13,7 @@ export interface UserRecord {
   memoryTtlDays: number | null;
   status: string;
   isBlocked: boolean;
+  aiModeEnabled: boolean;
   firstSeen: Date;
   lastSeen: Date;
   messageCount: number;
@@ -71,11 +74,11 @@ class UserService {
   async getUser(userId: string): Promise<UserRecord | null> {
     const cacheKey = this.cacheKey(userId);
     const cached = this.cache.get<UserRecord>(cacheKey);
-    if (cached) return cached;
+    if (cached) return this.downgradeIfExpired(cached);
     try {
       const user = await prisma.user.findUnique({ where: { userId } });
       if (user) {
-        const record = this.toRecord(user);
+        const record = await this.downgradeIfExpired(this.toRecord(user));
         this.cache.set(cacheKey, record);
         return record;
       }
@@ -98,7 +101,11 @@ class UserService {
         where = { lastSeen: { lt: sevenDaysAgo } };
       }
       const users = await prisma.user.findMany({ where, orderBy: { lastSeen: 'desc' }, take, skip });
-      return users.map(u => this.toRecord(u));
+      // Lazy downgrade juga di jalur list — supaya `!premium list` / dashboard
+      // tidak menampilkan user yang masa aktifnya sudah lewat. Hasil map HARUS
+      // dipakai (bukan array records asli) karena downgrade mengembalikan
+      // record baru. Tidak di-cache karena getUsers selalu query DB.
+      return await Promise.all(users.map(async (u) => this.downgradeIfExpired(this.toRecord(u))));
     } catch (error) {
       log.error('[UserService] Failed to get users:', error as object);
       return [];
@@ -115,14 +122,63 @@ class UserService {
     }
   }
 
-  async setTier(userId: string, tier: string, expiry?: Date): Promise<void> {
+  /**
+   * Set tier user beserta masa aktifnya.
+   *
+   * `expiry === undefined` berarti "jangan sentuh premiumExpiry" supaya caller
+   * lama (yang tidak tahu soal expiry) tidak menghapus expiry yang sudah ada.
+   * Kirim `null` eksplisit untuk menghapus masa aktif.
+   */
+  async setTier(userId: string, tier: string, expiry?: Date | null): Promise<void> {
     try {
-      await prisma.user.update({ where: { userId }, data: { tier, premiumExpiry: expiry ?? null } });
+      const normalised = normaliseTier(tier);
+      const data: Prisma.UserUpdateInput = { tier: normalised };
+      if (expiry !== undefined) data.premiumExpiry = expiry;
+      await prisma.user.update({ where: { userId }, data });
       this.cache.del(this.cacheKey(userId));
-      log.info(`[UserService] User ${userId} tier set to ${tier}`);
+      log.info(`[UserService] User ${userId} tier set to ${normalised}${expiry === undefined ? '' : ` (expiry: ${expiry ? expiry.toISOString() : 'none'})`}`);
     } catch (error) {
       log.error(`[UserService] Failed to set tier for ${userId}:`, error as object);
     }
+  }
+
+  /** Set hanya masa aktif, tanpa mengubah tier. null = hapus masa aktif. */
+  async setPremiumExpiry(userId: string, expiry: Date | null): Promise<void> {
+    try {
+      await prisma.user.update({ where: { userId }, data: { premiumExpiry: expiry } });
+      this.cache.del(this.cacheKey(userId));
+      log.info(`[UserService] User ${userId} premium expiry → ${expiry ? expiry.toISOString() : 'none'}`);
+    } catch (error) {
+      log.error(`[UserService] Failed to set premium expiry for ${userId}:`, error as object);
+    }
+  }
+
+  /**
+   * Turunkan tier ke free kalau masa aktif sudah lewat — lazy, tanpa cron.
+   *
+   * Dipanggil setiap kali user dibaca (getUser / getUsers). Field `tier` di DB
+   * ikut ditulis supaya query agregat (stats, filter dashboard) tetap akurat.
+   * Idempoten: user free / masih aktif dilewatkan tanpa I/O.
+   */
+  private async downgradeIfExpired(record: UserRecord): Promise<UserRecord> {
+    const stored = normaliseTier(record.tier);
+    if (stored === 'free' || !record.premiumExpiry) return record;
+
+    const effective: TierName = resolveEffectiveTier(record);
+    if (effective === stored) return record;
+
+    const demoted: UserRecord = { ...record, tier: effective };
+    this.cache.set(this.cacheKey(record.userId), demoted);
+    log.info(`[UserService] 🔻 ${record.userId.split('@')[0]} turun ${stored} → ${effective} (premium habis ${record.premiumExpiry.toISOString()})`);
+    try {
+      // Jangan hapus premiumExpiry — biar riwayat "habis kapan" tetap terbaca
+      // dan tidak perlu tulis DB lagi di request berikutnya (guard di atas
+      // sudah menangkap tier yang sudah free).
+      await prisma.user.update({ where: { userId: record.userId }, data: { tier: effective } });
+    } catch (error) {
+      log.debug(`[UserService] Non-critical: downgrade persist failed for ${record.userId}: ${(error as Error).message}`);
+    }
+    return demoted;
   }
 
   async getStats(): Promise<UserStats> {
@@ -146,6 +202,46 @@ class UserService {
     this.cache.del(this.cacheKey(userId));
   }
 
+  /**
+   * Update parsial (dipakai API dashboard). Hanya field yang ada di `patch`
+   * yang ditulis. `tier` dan `premiumExpiry` divalidasi/dinormalisasi di sini.
+   *
+   * Aturan: tier `free` selalu menghapus `premiumExpiry` — supaya tidak ada
+   * baris "free tapi punya masa aktif" yang bikin dashboard bingung.
+   */
+  async updateUser(
+    userId: string,
+    patch: {
+      tier?: string;
+      premiumExpiry?: Date | null;
+      isBlocked?: boolean;
+      aiModeEnabled?: boolean;
+      status?: string;
+    },
+  ): Promise<UserRecord | null> {
+    const data: Prisma.UserUpdateInput = {};
+    if (patch.tier !== undefined) {
+      const tier = normaliseTier(patch.tier);
+      data.tier = tier;
+      if (tier === 'free') data.premiumExpiry = null;
+    }
+    if (patch.premiumExpiry !== undefined && data.premiumExpiry === undefined) {
+      data.premiumExpiry = patch.premiumExpiry;
+    }
+    if (patch.isBlocked !== undefined) data.isBlocked = patch.isBlocked;
+    if (patch.aiModeEnabled !== undefined) data.aiModeEnabled = patch.aiModeEnabled;
+    if (patch.status !== undefined) data.status = patch.status;
+    if (Object.keys(data).length === 0) return this.getUser(userId);
+    try {
+      const updated = await prisma.user.update({ where: { userId }, data });
+      this.cache.del(this.cacheKey(userId));
+      return this.toRecord(updated);
+    } catch (error) {
+      log.debug(`[UserService] Non-critical: updateUser failed for ${userId}: ${(error as Error).message}`);
+      return null;
+    }
+  }
+
   private cacheKey(userId: string): string {
     return `user:${userId}`;
   }
@@ -160,6 +256,7 @@ class UserService {
       memoryTtlDays: user.memoryTtlDays ?? null,
       status: user.status ?? 'active',
       isBlocked: user.isBlocked ?? false,
+      aiModeEnabled: user.aiModeEnabled ?? false,
       firstSeen: user.firstSeen,
       lastSeen: user.lastSeen,
       messageCount: user.messageCount ?? 0,

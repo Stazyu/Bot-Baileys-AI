@@ -84,6 +84,10 @@ export interface UserItem {
   pushName: string | null;
   sessionId: string | null;
   tier: string;
+  /** Tier yang berlaku sekarang (tier tersimpan bisa basi kalau sudah expired). */
+  effectiveTier?: string;
+  /** ISO 8601 atau null = tanpa masa aktif. */
+  premiumExpiry?: string | null;
   status: string;
   isBlocked: boolean;
   aiModeEnabled: boolean;
@@ -105,6 +109,8 @@ export interface UsersSummary {
   inactive: number;
   byTier: Record<string, number>;
   aiMode: number;
+  /** Jumlah premium yang masa aktifnya habis dalam 7 hari. */
+  expiring7d?: number;
 }
 
 export interface ChatMessage {

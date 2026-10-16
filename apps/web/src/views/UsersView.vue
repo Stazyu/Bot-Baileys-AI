@@ -4,8 +4,17 @@ import { Ban, Bot, Brain, Crown, Search, UserCheck, Users, type LucideIcon } fro
 import { cn } from '@/lib/utils'
 import { ApiError, api } from '@/lib/api'
 import type { UserItem, UsersPage, UsersSummary } from '@/lib/api-types'
-import { initials, shortJid, timeAgo } from '@/lib/format'
+import { daysUntil, formatDate, initials, shortJid, timeAgo } from '@/lib/format'
 import Skeleton from '@/components/ui/skeleton/Skeleton.vue'
+import Input from '@/components/ui/input/Input.vue'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 
 type Tier = 'free' | 'premium' | 'pro'
 
@@ -98,18 +107,95 @@ onMounted(() => {
   void loadPage()
 })
 
+// ── Tier & expiry editor ───────────────────────────────────────────
+type ExpiryMode = 'keep' | 'days' | 'never'
+
+const editTarget = ref<UserItem | null>(null)
+const editTier = ref<Tier>('free')
+const editMode = ref<ExpiryMode>('days')
+const editDays = ref(30)
+const editBusy = ref(false)
+const editError = ref('')
+
+/** Tier yang benar-benar berlaku (fallback ke `tier` untuk API lama). */
+function effectiveTier(user: UserItem): Tier {
+  return asTier(user.effectiveTier ?? user.tier)
+}
+
+/**
+ * Ringkasan masa aktif untuk badge baris. `null` = tidak perlu badge
+ * (user free). Warna: abu = aman, kuning = ≤7 hari, merah = sudah lewat.
+ */
+function expiryBadge(user: UserItem): { text: string; tone: string } | null {
+  if (effectiveTier(user) === 'free') return null
+  const days = daysUntil(user.premiumExpiry ?? null)
+  if (days === null) return { text: 'no expiry', tone: 'bg-muted text-muted-foreground' }
+  if (days <= 0) return { text: 'expired', tone: 'bg-rose-500/10 text-rose-600 dark:text-rose-300' }
+  if (days <= 7) return { text: `${days}d left`, tone: 'bg-amber-500/10 text-amber-600 dark:text-amber-300' }
+  return { text: formatDate(user.premiumExpiry as string), tone: 'bg-muted text-muted-foreground' }
+}
+
+function openEditor(user: UserItem): void {
+  editTarget.value = user
+  editTier.value = effectiveTier(user)
+  // User yang sudah punya expiry: default "keep" supaya menyimpan ulang
+  // tidak diam-diam memotong atau memperpanjang masa aktifnya.
+  editMode.value = user.premiumExpiry ? 'keep' : 'days'
+  editDays.value = 30
+  editError.value = ''
+}
+
+async function saveEditor(): Promise<void> {
+  const target = editTarget.value
+  if (!target) return
+  if (editTier.value !== 'free' && editMode.value === 'days') {
+    if (!Number.isFinite(editDays.value) || editDays.value < 1) {
+      editError.value = 'Days must be at least 1.'
+      return
+    }
+  }
+  editBusy.value = true
+  editError.value = ''
+  try {
+    const body: Record<string, unknown> = { tier: editTier.value }
+    // Tier free selalu tanpa expiry; 'keep' berarti jangan kirim field expiry.
+    if (editTier.value === 'free') body.durationDays = null
+    else if (editMode.value === 'days') body.durationDays = Math.floor(editDays.value)
+    else if (editMode.value === 'never') body.durationDays = null
+
+    const updated = await api<UserItem>(`/api/users/${encodeURIComponent(target.userId)}`, {
+      method: 'PATCH',
+      body,
+    })
+    const idx = items.value.findIndex((u) => u.userId === target.userId)
+    if (idx >= 0) items.value[idx] = updated
+    editTarget.value = null
+    void loadSummary()
+  } catch (e) {
+    editError.value = e instanceof ApiError ? e.message : 'Failed to save'
+  } finally {
+    editBusy.value = false
+  }
+}
+
 // ── Stats ──────────────────────────────────────────────────────────
 const totalUsers = computed(() => summary.value?.total ?? total.value)
 const activeUsers = computed(() => summary.value?.active ?? 0)
 const premiumUsers = computed(() => (summary.value ? (summary.value.byTier.premium ?? 0) + (summary.value.byTier.pro ?? 0) : 0))
 const aiModeUsers = computed(() => summary.value?.aiMode ?? 0)
+const expiringSoon = computed(() => summary.value?.expiring7d ?? 0)
 
 const statCards = computed<{ label: string; value: number; icon: LucideIcon; change: string }[]>(() => {
   const pct = (n: number): string => (totalUsers.value > 0 ? `${Math.round((n / totalUsers.value) * 100)}% of total` : '—')
   return [
     { label: 'Total Users', value: totalUsers.value, icon: Users, change: `${activeUsers.value} active` },
     { label: 'Active', value: activeUsers.value, icon: UserCheck, change: `${activeUsers.value} of ${totalUsers.value}` },
-    { label: 'Premium', value: premiumUsers.value, icon: Crown, change: pct(premiumUsers.value) },
+    {
+      label: 'Premium',
+      value: premiumUsers.value,
+      icon: Crown,
+      change: expiringSoon.value > 0 ? `${expiringSoon.value} expiring ≤7d` : pct(premiumUsers.value),
+    },
     { label: 'AI Mode', value: aiModeUsers.value, icon: Bot, change: pct(aiModeUsers.value) },
   ]
 })
@@ -257,8 +343,14 @@ const clearFilters = (): void => {
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
               <p class="truncate text-sm font-semibold">{{ user.pushName ?? shortJid(user.userId) }}</p>
-              <span :class="cn('rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize', tierPill(asTier(user.tier)))">
-                {{ asTier(user.tier) }}
+              <span :class="cn('rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize', tierPill(effectiveTier(user)))">
+                {{ effectiveTier(user) }}
+              </span>
+              <span
+                v-if="expiryBadge(user)"
+                :class="cn('rounded-full px-2 py-0.5 text-[11px] font-semibold', expiryBadge(user)!.tone)"
+              >
+                {{ expiryBadge(user)!.text }}
               </span>
               <span v-if="user.aiModeEnabled" class="inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-2 py-0.5 text-[11px] font-semibold text-violet-600 dark:text-violet-300">
                 <Brain class="size-3" />
@@ -279,6 +371,14 @@ const clearFilters = (): void => {
           <span class="hidden w-20 shrink-0 text-right text-[11px] text-muted-foreground md:block">
             {{ timeAgo(user.lastSeen) }}
           </span>
+          <button
+            @click="openEditor(user)"
+            :title="`Edit tier for ${shortJid(user.userId)}`"
+            :aria-label="`Edit tier for ${shortJid(user.userId)}`"
+            class="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-design hover:bg-amber-500/10 hover:text-amber-600 dark:hover:text-amber-300"
+          >
+            <Crown class="size-4" />
+          </button>
           <button
             @click="toggleBlock(user)"
             :disabled="actionBusy === user.userId"
@@ -323,5 +423,86 @@ const clearFilters = (): void => {
         </button>
       </div>
     </section>
+
+    <!-- ══ Tier & expiry editor ══ -->
+    <Dialog :open="editTarget !== null" @update:open="!$event && (editTarget = null)">
+      <DialogContent v-if="editTarget" class="sm:max-w-md">
+        <DialogHeader>
+          <p class="text-eyebrow text-muted-foreground">Premium</p>
+          <DialogTitle class="mt-1">Edit tier &amp; expiry</DialogTitle>
+          <DialogDescription>
+            <span class="font-mono font-semibold text-foreground">{{ shortJid(editTarget.userId) }}</span>
+            · currently {{ effectiveTier(editTarget) }}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div class="space-y-4">
+          <div>
+            <p class="text-eyebrow mb-2 text-muted-foreground">Tier</p>
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-for="t in (['free', 'premium', 'pro'] as const)"
+                :key="t"
+                @click="editTier = t"
+                :aria-pressed="editTier === t"
+                :class="cn(
+                  'rounded-full px-4 py-2 text-xs font-semibold capitalize transition-design',
+                  editTier === t ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground hover:text-foreground',
+                )"
+              >
+                {{ t }}
+              </button>
+            </div>
+          </div>
+
+          <div v-if="editTier !== 'free'">
+            <p class="text-eyebrow mb-2 text-muted-foreground">Expiry</p>
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-for="m in (['keep', 'days', 'never'] as const)"
+                :key="m"
+                @click="editMode = m"
+                :aria-pressed="editMode === m"
+                :class="cn(
+                  'rounded-full px-4 py-2 text-xs font-semibold capitalize transition-design',
+                  editMode === m ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground hover:text-foreground',
+                )"
+              >
+                {{ m === 'keep' ? 'keep current' : m === 'days' ? 'N days' : 'no expiry' }}
+              </button>
+            </div>
+            <div v-if="editMode === 'days'" class="mt-3">
+              <Input v-model.number="editDays" type="number" min="1" class="rounded-2xl" />
+              <p class="mt-1 text-[11px] text-muted-foreground">
+                Counted from now · 30 = 1 month, 365 = 1 year.
+              </p>
+            </div>
+            <p v-else-if="editMode === 'keep'" class="mt-3 text-[11px] text-muted-foreground">
+              Current: {{ editTarget.premiumExpiry ? formatDate(editTarget.premiumExpiry) : 'no expiry — nothing to keep' }}
+            </p>
+          </div>
+
+          <p v-if="editError" class="rounded-2xl bg-rose-500/10 px-4 py-2.5 text-xs font-semibold text-rose-600 dark:text-rose-300">
+            {{ editError }}
+          </p>
+        </div>
+
+        <DialogFooter>
+          <button
+            @click="editTarget = null"
+            class="rounded-full px-5 py-2.5 text-sm font-semibold text-muted-foreground transition-design hover:bg-muted hover:text-foreground"
+          >
+            Cancel
+          </button>
+          <button
+            @click="saveEditor"
+            :disabled="editBusy"
+            class="rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-design hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {{ editBusy ? 'Saving…' : 'Save' }}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>

@@ -48,3 +48,16 @@ export function shortJid(jid: string | null): string {
   if (!jid) return '—';
   return jid.split('@')[0] ?? jid;
 }
+
+export function formatDate(input: string | Date): string {
+  return toDate(input).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+/**
+ * Sisa hari sampai `input`. Negatif kalau sudah lewat.
+ * Dipakai untuk membaca `premiumExpiry` di tabel user.
+ */
+export function daysUntil(input: string | Date | null | undefined): number | null {
+  if (!input) return null;
+  return Math.ceil((toDate(input).getTime() - Date.now()) / 86_400_000);
+}
