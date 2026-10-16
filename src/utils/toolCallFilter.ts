@@ -14,7 +14,7 @@
 /**
  * Regex patterns for known tool call artifact formats.
  */
-const TOOL_CALL_STRIP_RE = /<tool_calls\b[^>]*>[\s\S]*?(?:<\/tool_calls\s*>|$)|\{"name":"\w+","arguments":\{[^}]*\}\}|<invoke\s+name\s*=\s*"(?:web_search|web_fetch|download_social_media|download_youtube|pinterest_search)"[\s\S]*?<\/invoke\s*>|```(?:json)?\s*\{\s*"name":\s*"\w+",\s*"arguments":[\s\S]*?```/gi;
+const TOOL_CALL_STRIP_RE = /<tool_calls\b[^>]*>[\s\S]*?(?:<\/tool_calls\s*>|$)|\{"name":"\w+","arguments":\{[^}]*\}\}|<invoke\s+name\s*=\s*"(?:web_search|web_fetch|download_social_media|download_youtube|pinterest_search|gallery_dl_sticker|pinterest_sticker|create_sticker|make_sticker|group_warning)"[\s\S]*?<\/invoke\s*>|```(?:json)?\s*\{\s*"name":\s*"\w+",\s*"arguments":[\s\S]*?```/gi;
 
 const DSML_MARKER_RE = /<\s*\/?\s*(?:\||｜){2}\s*DSML\s*(?:\||｜){2}/i;
 const STANDARD_TOOL_MARKER_RE = /<\s*\/?\s*(?:tool_calls|invoke|parameter)\b/i;

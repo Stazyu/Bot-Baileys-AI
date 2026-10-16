@@ -38,6 +38,11 @@ import {
   execute as executeGroupWarning,
 } from "./groupWarning.js";
 
+import {
+  definition as createStickerDef,
+  execute as executeCreateSticker,
+} from "./createSticker.js";
+
 export const downloadSocialMedia = downloadSocialDef;
 export const downloadYoutube = downloadYoutubeDef;
 export const pinterestSearch = pinterestSearchDef;
@@ -46,6 +51,7 @@ export const pinterestSticker = galleryDlStickerDef;
 export const webFetch = webFetchDef;
 export const webSearch = webSearchDef;
 export const groupWarning = groupWarningDef;
+export const createSticker = createStickerDef;
 
 export {
   executeDownloadSocial,
@@ -55,6 +61,7 @@ export {
   executeWebFetch,
   executeWebSearch,
   executeGroupWarning,
+  executeCreateSticker,
 };
 
 /**
@@ -105,5 +112,16 @@ export const allTools: Array<{
     name: "group_warning",
     definition: groupWarningDef,
     execute: executeGroupWarning,
+  },
+  {
+    name: "create_sticker",
+    definition: createStickerDef,
+    execute: executeCreateSticker,
+  },
+  // Alias
+  {
+    name: "make_sticker",
+    definition: createStickerDef,
+    execute: executeCreateSticker,
   },
 ];

@@ -154,8 +154,14 @@ ${isOwner(userId) ? `• ${context.simplified?.prefix || "!"}ai model <nama mode
         sessionId: userId,
         waSessionId: context.sessionId,
         userId,
+        callerLid: context.simplified?.participant || undefined,
         pushName: context.simplified?.pushName ?? undefined,
         userMessage: aiPrompt,
+        mentions: context.simplified?.mentions,
+        quotedParticipant: context.simplified?.quotedInfo?.participant || undefined,
+        message: context.message,
+        simplified: context.simplified,
+        visionImages: visionImage ? [visionImage] : undefined,
       };
 
       let responseBuffer = "";

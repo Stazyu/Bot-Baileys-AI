@@ -973,6 +973,9 @@ export class BotHandler {
         userMessage: aiPromptMessage,
         mentions: simplified.mentions,
         quotedParticipant: simplified.quotedInfo?.participant || undefined,
+        message: originalMessage,
+        simplified,
+        visionImages,
       };
 
       // Verify sender role LOCALLY (owner config / group admin / member).
@@ -1132,8 +1135,14 @@ export class BotHandler {
         sessionId: userId,
         waSessionId: this.sessionId,
         userId,
+        callerLid: simplified.participant || undefined,
         pushName: simplified.pushName ?? undefined,
         userMessage: aiPromptMessage,
+        mentions: simplified.mentions,
+        quotedParticipant: simplified.quotedInfo?.participant || undefined,
+        message: originalMessage,
+        simplified,
+        visionImages,
       };
 
       let fullResponse = '';

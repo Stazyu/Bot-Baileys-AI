@@ -1,4 +1,6 @@
-import type { WASocket } from '@stazyu/baileys';
+import type { proto, WAMessage, WASocket } from '@stazyu/baileys';
+import type { SimplifiedMessage } from '../bot/botHandler.js';
+import type { VisionImage } from '../utils/vision.js';
 
 /**
  * Parameter definition for an AI tool (JSON Schema format).
@@ -76,6 +78,12 @@ export interface ToolContext {
   mentions?: string[];
   /** Quoted participant JID/LID in the triggering message */
   quotedParticipant?: string;
+  /** The full incoming message (or proto.IWebMessageInfo) */
+  message?: WAMessage;
+  /** Simplified message with extracted metadata (isImage, isQuotedImage, etc.) */
+  simplified?: SimplifiedMessage;
+  /** Vision images already extracted for this turn, if any */
+  visionImages?: VisionImage[] | null;
 }
 
 /**
