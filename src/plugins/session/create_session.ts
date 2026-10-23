@@ -8,7 +8,7 @@ const createSessionCommand: CommandModule = {
     description: 'Create a new session',
     usage: '!create_session <session-id>',
     category: 'session',
-    adminOnly: true,
+    ownerOnly: true,
   },
   handler: async function (context, args: string[]): Promise<void> {
     const newSessionId = args[0];

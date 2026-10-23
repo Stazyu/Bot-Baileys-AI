@@ -8,7 +8,7 @@ const disconnectSessionCommand: CommandModule = {
     description: 'Disconnect a session',
     usage: '!disconnect_session <session-id>',
     category: 'session',
-    adminOnly: true,
+    ownerOnly: true,
   },
   handler: async function (context, args: string[]): Promise<void> {
     const targetSessionId = args[0];

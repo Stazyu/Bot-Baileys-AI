@@ -8,9 +8,9 @@ const listSessionsCommand: CommandModule = {
     description: 'List all active sessions',
     usage: '!list_sessions',
     category: 'session',
-    adminOnly: true,
+    ownerOnly: true,
   },
-  handler: async function (context, args: string[]): Promise<void> {
+  handler: async function (context): Promise<void> {
     const sessions = await getAllSessions();
     const sessionList = Array.from(sessions.keys()).join('\n- ');
     const listText = `📱 *Active Sessions*
