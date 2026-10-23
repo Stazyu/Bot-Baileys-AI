@@ -21,7 +21,8 @@ export interface CommandConfig {
   category?: string;
   cooldown?: number;
   ownerOnly?: boolean;
-  adminOnly?: boolean;
+  /** Group admin only — requester must be a WhatsApp admin in the current group. Not bot-wide admin. */
+  groupAdminOnly?: boolean;
   groupOnly?: boolean;
   privateOnly?: boolean;
   /** Whether this command is only accessible by premium/pro users. Owners bypass this check. */

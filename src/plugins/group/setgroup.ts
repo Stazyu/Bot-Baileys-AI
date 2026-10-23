@@ -7,7 +7,7 @@ const setGroupCommand: CommandModule = {
     description: 'Open or close group (admin only)',
     usage: '!close or !open',
     category: 'group',
-    adminOnly: true,
+    groupAdminOnly: true,
     groupOnly: true,
   },
   handler: async function (context, args: string[]): Promise<void> {

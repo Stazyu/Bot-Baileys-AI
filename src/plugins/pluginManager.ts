@@ -280,13 +280,13 @@ export class PluginManager {
         }
       }
 
-      if (commandData.config.adminOnly) {
+      if (commandData.config.groupAdminOnly) {
         const isGroup = context.fromJid.endsWith('@g.us');
         const isAdmin = context.fromMe || (isGroup && await this.isGroupAdmin(context, context.fromJid, participantJid));
         if (!isAdmin) {
-          log.info(`🚫 [PluginManager] Permission denied: admin only for "${resolvedCommand}"`);
+          log.info(`🚫 [PluginManager] Permission denied: group admin only for "${resolvedCommand}"`);
           await context.socket.sendMessage(context.fromJid, {
-            text: '❌ This command is admin only',
+            text: '❌ This command is group admin only',
           }).catch(() => {});
           return true;
         }

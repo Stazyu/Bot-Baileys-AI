@@ -7,7 +7,7 @@ const hidetagCommand: CommandModule = {
     description: 'Send a hidden tag message to all group members (admin only)',
     usage: '!hidetag <message>',
     category: 'group',
-    adminOnly: true,
+    groupAdminOnly: true,
     groupOnly: true,
   },
   handler: async function (context, args: string[]): Promise<void> {

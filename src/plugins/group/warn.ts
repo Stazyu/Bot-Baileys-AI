@@ -14,7 +14,7 @@ const warnCommand: CommandModule = {
     description: 'Beri peringatan (1-3) ke member grup, reset, atau lihat daftar peringatan (admin only)',
     usage: '!warn @user [alasan] | !warn 1 @user | !unwarn @user | !warnlist',
     category: 'group',
-    adminOnly: true,
+    groupAdminOnly: true,
     groupOnly: true,
   },
   handler: async function (context: CommandContext, args: string[]): Promise<void> {

@@ -35,7 +35,7 @@ const myPlugin: PluginModule = {
       usage: '!mycommand <arg>',
       category: 'mycategory',
       cooldown: 5000, // 5 seconds cooldown
-      adminOnly: false,
+      groupAdminOnly: false,
       groupOnly: false,
       privateOnly: false,
     },
@@ -87,7 +87,8 @@ interface CommandContext {
 - **usage**: Usage example (required)
 - **category**: Command category for grouping (optional)
 - **cooldown**: Cooldown in milliseconds (optional)
-- **adminOnly**: Only bot admins can use (optional, default: false)
+- **groupAdminOnly**: Only WhatsApp group admins can use it (optional, default: false). Evaluated against the current group's admin list — it is not a bot-wide admin flag.
+- **ownerOnly**: Only the bot owner can use it (optional, default: false).
 - **groupOnly**: Only works in groups (optional, default: false)
 - **privateOnly**: Only works in private chats (optional, default: false)
 
@@ -103,7 +104,7 @@ interface CommandContext {
 - `!help` / `!h` / `!menu` - Show available commands
 - `!status` / `!s` - Check bot status
 
-### Session Commands (Admin Only)
+### Session Commands (Owner Only)
 - `!create_session <id>` / `!cs <id>` - Create new session
 - `!list_sessions` / `!ls` - List all active sessions
 - `!disconnect_session <id>` / `!ds <id>` - Disconnect a session

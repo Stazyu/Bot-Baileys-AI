@@ -66,7 +66,7 @@ const helpCommand: CommandModule = {
 ┃
 ┃ ✦ *Pakai:* \`${command.config.usage.replace('!', matchedPrefix)}\`${aliasesText}
 ┃ ✦ *Kategori:* ${categoryIcons[command.config.category || ''] || '📁'} ${command.config.category || 'general'}
-┃ ✦ *Admin:* ${command.config.adminOnly ? '✅ Ya' : '❌ Tidak'}
+┃ ✦ *Group Admin:* ${command.config.groupAdminOnly ? '✅ Ya' : '❌ Tidak'}
 ┃ ✦ *Owner:* ${command.config.ownerOnly ? '✅ Ya' : '❌ Tidak'}
 ┃ ✦ *Premium:* ${command.config.premiumOnly ? '✅ Ya' : '❌ Tidak'}
 ┃
