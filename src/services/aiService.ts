@@ -15,6 +15,12 @@ import type { ToolContext, ToolExecuteResult } from "../types/tools.js";
 import { persistToolCall } from "./toolLogService.js";
 import { memoryService, parseMemoryKey } from "./memoryService.js";
 import {
+  buildCacheMetric,
+  promptCacheTracker,
+  summarizeCacheMetric,
+  type CacheUsageSample,
+} from "./promptCacheMetrics.js";
+import {
   containsToolCallArtifact,
   stripToolCallArtifacts,
 } from "../utils/toolCallFilter.js";
@@ -623,12 +629,38 @@ export class AIService {
          */
         let toolFailed = false;
 
+        /**
+         * Prompt-cache accounting. Every model step reports its own usage; a
+         * tool loop produces several. Collected here and logged once per turn
+         * so a cache regression (volatile prefix) is visible immediately.
+         */
+        const usageSamples: CacheUsageSample[] = [];
+        let servedBy: string | undefined;
+
         type FullStreamPart = {
           type: string;
           text?: string;
           delta?: string;
           error?: unknown;
           finishReason?: string;
+          usage?: {
+            inputTokens?: number | null;
+            outputTokens?: number | null;
+            totalUsage?: {
+              inputTokens?: number | null;
+              outputTokens?: number | null;
+              inputTokenDetails?: {
+                cacheReadTokens?: number | null;
+                noCacheTokens?: number | null;
+              };
+            };
+            inputTokenDetails?: {
+              cacheReadTokens?: number | null;
+              noCacheTokens?: number | null;
+            };
+          };
+          totalUsage?: FullStreamPart["usage"];
+          response?: { modelId?: string };
         };
 
         // SAFETY: `result.stream` is an untyped AsyncIterable at this version;
@@ -678,6 +710,23 @@ export class AIService {
             case "abort":
               streamError = streamError ?? new Error("Stream aborted before completion");
               break;
+            // Per-step usage: the only place `cacheReadTokens` shows up.
+            case "finish-step": {
+              const usage = part.usage ?? part.totalUsage;
+              if (usage) {
+                const details = usage.inputTokenDetails ?? usage.totalUsage?.inputTokenDetails;
+                usageSamples.push({
+                  inputTokens: usage.inputTokens ?? usage.totalUsage?.inputTokens,
+                  outputTokens: usage.outputTokens ?? usage.totalUsage?.outputTokens,
+                  cacheReadTokens: details?.cacheReadTokens,
+                  noCacheTokens: details?.noCacheTokens,
+                });
+              }
+              if (!servedBy && part.response?.modelId) {
+                servedBy = part.response.modelId;
+              }
+              break;
+            }
             case "finish":
               sawFinish = true;
               // A finish reason of 'error' also means the step failed.
@@ -694,6 +743,14 @@ export class AIService {
         // instead of falling through to the tool-success fallback below.
         if (streamError) {
           throw streamError;
+        }
+
+        // Cache accounting runs even when the answer ends up empty: the tokens
+        // were still billed, so a wasted turn must not hide from the metric.
+        if (usageSamples.length > 0) {
+          const metric = buildCacheMetric(usageSamples, servedBy);
+          promptCacheTracker.record(metric);
+          console.log(summarizeCacheMetric(metric, sessionId));
         }
 
         // No `finish` part at all means the stream ended abruptly (connection
