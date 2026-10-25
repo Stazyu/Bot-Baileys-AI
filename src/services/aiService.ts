@@ -187,6 +187,17 @@ export class AIService {
   private readonly GROUP_TTL_SEC = 10 * 60;
   private readonly PRIVATE_TTL_SEC = 60 * 60;
   private readonly MAX_CONVERSATIONS = 1000;
+  /**
+   * Windowed history trim for L1 (see setConversation).
+   *
+   * Threshold is deliberately LOOSE and the drop is a whole batch, because
+   * prompt caching outranks prompt brevity here (measured: dropping history
+   * from the FRONT invalidates the cached prefix → 0% hit on that turn).
+   * A window of this size means one miss per ~30 turns instead of a miss on
+   * every turn once a naive per-turn cap is reached.
+   */
+  private readonly MAX_HISTORY_TURNS = 64;
+  private readonly TRIM_TO_TURNS = 32;
 
   constructor() {
     this.conversationCache = new NodeCache({
@@ -1108,12 +1119,51 @@ export class AIService {
     const ttl = this.isGroupSession(sessionId)
       ? this.GROUP_TTL_SEC
       : this.PRIVATE_TTL_SEC;
-    this.conversationCache.set(sessionId, this.pruneVisionHistory(messages), ttl);
+    const trimmed = this.trimConversationWindow(messages);
+    this.conversationCache.set(
+      sessionId,
+      this.pruneVisionHistory(trimmed),
+      ttl,
+    );
     // L2 persisten (fire-and-forget; save() no-op untuk free/TTL 0).
     // setConversation hanya dipanggil setelah turn sukses, jadi yang tersimpan
     // tidak pernah history yang teracuni kegagalan upstream.
     const { userId, scope } = parseMemoryKey(sessionId);
-    void memoryService.save(userId, scope, messages);
+    void memoryService.save(userId, scope, trimmed);
+  }
+
+  /**
+   * Keep L1 history bounded WITHOUT thrashing the prompt cache.
+   *
+   * Why a window and not a hard cap: history is append-only, so the cached
+   * prefix grows with the conversation and every turn stays a cache hit.
+   * Dropping turns from the FRONT shifts every following message, so the
+   * provider's prefix no longer matches and the whole request is re-billed
+   * at full price (measured 0% on the trimming turn).
+   *
+   * Therefore: let history grow to MAX_HISTORY_TURNS, then cut all the way
+   * down to TRIM_TO_TURNS in one go. That is one cache miss per
+   * (MAX - TRIM) = 32 turns, instead of a miss on every single turn.
+   *
+   * The system prompt is always kept at index 0 — it is refreshed separately
+   * by upsertSystemPrompt and is the most valuable part of the cache.
+   */
+  private trimConversationWindow(messages: ChatMessage[]): ChatMessage[] {
+    const system = messages.find((m) => m.role === "system");
+    const rest = messages.filter((m) => m.role !== "system");
+
+    // One turn = one user message + one assistant message.
+    const maxMessages = this.MAX_HISTORY_TURNS * 2;
+    if (rest.length <= maxMessages) {
+      return messages;
+    }
+
+    const kept = rest.slice(-this.TRIM_TO_TURNS * 2);
+    console.log(
+      `[PromptCache] history trimmed ${rest.length} → ${kept.length} messages ` +
+        `(intentional one-off cache miss to bound context)`,
+    );
+    return system ? [system, ...kept] : kept;
   }
 
   /**
