@@ -1,10 +1,10 @@
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, LogController } from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import websocket from '@fastify/websocket';
 import { registerAuth } from './auth.js';
 import { startRetentionLoop } from './events.js';
-import { registerHttpLogHooks } from './httpLog.js';
+import { isNoiseRequest, registerHttpLogHooks } from './httpLog.js';
 import { registerActivityRoutes } from './routes/activity.js';
 import { registerDashboardRoutes } from './routes/dashboard.js';
 import { registerHealthRoutes } from './routes/health.js';
@@ -37,6 +37,10 @@ export async function buildServer(): Promise<FastifyInstance> {
         },
       }),
     },
+    // Fastify's built-in "incoming request"/"request completed" pair bypasses
+    // our own trace hook, so the health probe kept flooding the log even though
+    // httpLog already skipped it. One shared predicate silences both surfaces.
+    logController: new LogController({ disableRequestLogging: isNoiseRequest }),
   });
 
   await app.register(cors, {

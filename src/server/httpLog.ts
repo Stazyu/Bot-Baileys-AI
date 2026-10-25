@@ -4,8 +4,14 @@ import { log } from '../utils/logger.js';
 
 const startTimes = new WeakMap<FastifyRequest, number>();
 
-function shouldSkip(req: FastifyRequest): boolean {
-  // Preflights carry no signal; the 30s health probe would only be noise.
+/**
+ * Paths that must never produce a log line — neither the one-line trace below
+ * nor Fastify's own pino "incoming request"/"request completed" pair.
+ * Both surfaces share this predicate so they can never drift apart again.
+ */
+export function isNoiseRequest(req: FastifyRequest): boolean {
+  // Preflights carry no signal; the health probe fires every 30s from the
+  // container HEALTHCHECK and would otherwise own the whole log.
   if (req.method === 'OPTIONS') return true;
   const path = req.url.split('?')[0];
   return req.method === 'GET' && path === '/api/health';
@@ -51,7 +57,7 @@ export async function registerHttpLogHooks(app: FastifyInstance): Promise<void> 
   });
 
   app.addHook('onResponse', (req, reply: FastifyReply, done: () => void) => {
-    if (!shouldSkip(req)) {
+    if (!isNoiseRequest(req)) {
       const startedAt = startTimes.get(req);
       const durationMs = startedAt === undefined ? null : Date.now() - startedAt;
       if (traceEnabled) {
