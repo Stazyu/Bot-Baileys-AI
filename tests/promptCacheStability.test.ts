@@ -4,6 +4,7 @@ import {
   getSystemPrompt,
   getGroupSystemPrompt,
   formatPromptNow,
+  buildTurnContext,
 } from '../src/services/systemPrompt.js';
 import {
   buildCacheMetric,
@@ -15,25 +16,45 @@ import {
 /**
  * Guard for prompt-cache hit rate.
  *
- * Providers cache by exact PREFIX match. The bug this test locks down: the
- * system prompt used to START with `Hari ini: <date, h:mm:ss a>`. Because the
- * seconds changed on every request, the cached prefix never matched and the
- * whole 5-7k token prompt (plus every history turn after it) was re-billed at
- * full price on every single turn — measured 0% hit on turn 2, versus 97% after
- * moving the volatile values to the END of the prompt.
+ * Providers cache by exact PREFIX match, and history sits AFTER the system
+ * prompt. Two bugs this file locks down, both measured against the live gateway:
  *
- * If a future edit moves a timestamp / name / role back into the body, these
+ *  1. The prompt used to START with `Hari ini: <date, h:mm:ss a>`. Seconds in
+ *     the first byte meant the prefix never matched -> 0% hit every turn.
+ *  2. Fixing (1) by moving the clock to the TAIL of the system prompt was only
+ *     half a fix: the clock still preceded the history, so every minute tick
+ *     invalidated the system prompt AND every history turn behind it. With a
+ *     40-turn history that measured 39% hit on *every* turn.
+ *
+ * The contract now: the system prompt contains NOTHING per-request. Clock and
+ * sender name travel in a [KONTEKS TERKINI] block appended to each USER
+ * message (buildTurnContext), saved with that message so it stays inside the
+ * cacheable prefix on later turns. Measured 84-93% (vs 39%) afterwards.
+ *
+ * If a future edit puts a timestamp / name back into the system prompt, these
  * tests fail — which is exactly the point. Do not "fix" them by loosening the
  * assertions.
  */
 
-const MARKER = '[KONTEKS TERKINI';
+/**
+ * Header of the REAL context block (not the prose that merely mentions it).
+ * The prompt body legitimately references "[KONTEKS TERKINI]" in instructions,
+ * so matching the bare marker would produce false positives.
+ */
+const CONTEXT_BLOCK_HEADER = 'data sistem, jangan diragukan';
 
-/** Everything BEFORE the trailing volatile block — this is the cacheable part. */
-function cacheablePrefix(prompt: string): string {
-  const index = prompt.indexOf(MARKER);
-  assert.notEqual(index, -1, 'prompt harus punya blok [KONTEKS TERKINI] di akhir');
-  return prompt.slice(0, index);
+/**
+ * The system prompt must be byte-identical between calls AND must not carry the
+ * volatile context block at all — that block belongs to the user message.
+ */
+function cacheablePrompt(prompt: string): string {
+  assert.equal(
+    prompt.indexOf(CONTEXT_BLOCK_HEADER),
+    -1,
+    'system prompt tidak boleh memuat blok konteks — blok itu milik pesan user; ' +
+      'kalau ditaruh di sini ia menggeser seluruh history -> cache batal tiap menit',
+  );
+  return prompt;
 }
 
 test('private prompt: prefix identik antar panggilan', () => {
@@ -44,7 +65,7 @@ test('private prompt: prefix identik antar panggilan', () => {
 
 test('private prompt: prefix stabil walau waktu berubah', () => {
   const prefixes = new Set<string>();
-  for (let i = 0; i < 12; i++) prefixes.add(cacheablePrefix(getSystemPrompt('member')));
+  for (let i = 0; i < 12; i++) prefixes.add(cacheablePrompt(getSystemPrompt('member')));
   assert.equal(prefixes.size, 1, 'prefix berubah-ubah → cache prompt tidak akan pernah hit');
 });
 
@@ -52,7 +73,7 @@ test('group prompt: prefix stabil walau jam & nama berbeda (role sama)', () => {
   const prefixes = new Set<string>();
   for (const time of ['00:00', '08:15', '23:59']) {
     for (const name of ['Budi', 'Siti']) {
-      prefixes.add(cacheablePrefix(getGroupSystemPrompt(time, name, 'member')));
+      prefixes.add(cacheablePrompt(getGroupSystemPrompt(time, name, 'member')));
     }
   }
   assert.equal(
@@ -70,7 +91,7 @@ test('group prompt: role menghasilkan paling banyak 3 varian prefix', () => {
   for (const role of ['member', 'admin', 'owner'] as const) {
     for (const time of ['00:00', '23:59']) {
       for (const name of ['Budi', 'Siti']) {
-        prefixes.add(cacheablePrefix(getGroupSystemPrompt(time, name, role)));
+        prefixes.add(cacheablePrompt(getGroupSystemPrompt(time, name, role)));
       }
     }
   }
@@ -80,14 +101,33 @@ test('group prompt: role menghasilkan paling banyak 3 varian prefix', () => {
   );
 });
 
-test('nilai volatil hanya boleh muncul di blok terakhir', () => {
+test('nilai volatil hidup di pesan user, bukan di system prompt', () => {
   const prompt = getGroupSystemPrompt('08:00', 'Budi', 'member');
-  const prefix = cacheablePrefix(prompt);
-  const tail = prompt.slice(prompt.indexOf(MARKER));
+  const block = buildTurnContext({ senderName: 'Budi', now: new Date('2026-10-27T10:00:00Z') });
 
-  // The name must be present — but only in the tail, never in the cached prefix.
-  assert.ok(tail.includes('Budi'), 'nama pengirim harus tersedia di blok konteks');
-  assert.ok(!prefix.includes('Budi'), 'nama pengirim bocor ke prefix → cache invalid');
+  // The values must still be delivered — just through the per-message block.
+  assert.match(block, /\[KONTEKS TERKINI/);
+  assert.ok(block.includes('Budi'), 'nama pengirim harus tersedia di blok konteks');
+  assert.match(block, /17:00 WIB/, 'jam WIB harus tersedia di blok konteks');
+
+  // ...and must NOT be baked into the cacheable system prompt.
+  assert.ok(!prompt.includes('Budi'), 'nama pengirim bocor ke system prompt → cache invalid');
+  assert.doesNotMatch(prompt, /\d{1,2}:\d{2} WIB/, 'jam bocor ke system prompt → cache invalid');
+});
+
+test('blok konteks per turn hanya berbeda di bagian yang memang volatil', () => {
+  // Two turns one minute apart must share everything except the clock line, so
+  // the cached prefix still covers the older block.
+  const a = buildTurnContext({ senderName: 'Budi', now: new Date('2026-10-27T10:00:00Z') });
+  const b = buildTurnContext({ senderName: 'Budi', now: new Date('2026-10-27T10:01:00Z') });
+  assert.notEqual(a, b, 'blok harus berubah saat menit berganti');
+  assert.ok(a.length === b.length, 'perubahan hanya nilai jam, panjang tetap');
+});
+
+test('private chat tidak mengirim nama pengirim (tidak ada gunanya)', () => {
+  const block = buildTurnContext({ now: new Date('2026-10-27T10:00:00Z') });
+  assert.doesNotMatch(block, /Nama pengirim/);
+  assert.match(block, /17:00 WIB/);
 });
 
 test('prefix tidak boleh memuat timestamp berdetik', () => {

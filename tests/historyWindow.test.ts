@@ -155,3 +155,87 @@ test('history dipangkas HANYA sekali saat melewati batas, bukan tiap turn', asyn
     );
   });
 });
+
+test('system prompt identik antar turn dan konteks menempel di pesan user', async () => {
+  await withMockProvider(async (getBodies) => {
+    const service = new AIService();
+
+    // Same role, different wall-clock minutes: the SYSTEM prompt must not move
+    // even one byte, otherwise the whole history behind it is re-billed.
+    for (let turn = 1; turn <= 4; turn++) {
+      await service.chatWithTools(
+        'window-context',
+        `pesan ke-${turn}`,
+        'system prompt stabil',
+        undefined,
+        { pushName: 'Budi' } as any,
+      );
+    }
+
+    const bodies = getBodies();
+    const systems = bodies.map((body) => (body.messages ?? []).find((m: any) => m.role === 'system'));
+    for (const system of systems) {
+      assert.equal(system.content, systems[0].content, 'system prompt berubah antar turn → cache batal');
+    }
+
+    // The volatile values must arrive attached to user messages instead.
+    const firstUser = (bodies[0].messages ?? []).find((m: any) => m.role === 'user');
+    assert.match(firstUser.content, /data sistem, jangan diragukan/);
+    assert.match(firstUser.content, /Nama pengirim pesan ini: Budi/);
+    assert.match(firstUser.content, /\d{2}:\d{2} WIB/);
+
+    // And the OLDER user messages must stay byte-identical: the context block
+    // is saved with its turn, never rewritten on a later request.
+    for (let i = 1; i < bodies.length; i++) {
+      const older = (bodies[i].messages ?? []).filter((m: any) => m.role === 'user');
+      const previous = (bodies[i - 1].messages ?? []).filter((m: any) => m.role === 'user');
+      assert.deepEqual(
+        older.slice(0, previous.length),
+        previous,
+        `turn ${i + 1}: pesan user lama ditulis ulang → prefix berubah, cache batal`,
+      );
+    }
+  });
+});
+
+test('konteks turn sebelumnya tersimpan di history (bukan dihitung ulang)', async () => {
+  await withMockProvider(async () => {
+    const service = new AIService();
+    await service.chatWithTools('window-persist', 'halo', 'sys', undefined, { pushName: 'Siti' } as any);
+
+    const stored = service.getConversationHistory('window-persist').find((m) => m.role === 'user');
+    assert.ok(stored, 'pesan user harus tersimpan');
+    const content = String(stored.content);
+    assert.match(content, /data sistem, jangan diragukan/, 'blok konteks harus ikut tersimpan');
+    assert.match(content, /Nama pengirim pesan ini: Siti/);
+  });
+});
+
+test('blok konteks masuk ke text part pertama saat ada gambar (vision)', async () => {
+  await withMockProvider(async (getBodies) => {
+    const service = new AIService();
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    );
+
+    await service.chatWithTools(
+      'window-vision',
+      'ini foto apa?',
+      'sys',
+      undefined,
+      { pushName: 'Budi' } as any,
+      [{ data: new Uint8Array(png), mediaType: 'image/png', isSticker: false, source: 'direct' }] as any,
+    );
+
+    const user = (getBodies()[0].messages ?? []).find((m: any) => m.role === 'user');
+    assert.ok(Array.isArray(user.content), 'pesan dengan gambar harus berupa parts');
+    assert.equal(user.content[0].type, 'text', 'blok konteks harus jadi text part pertama');
+    assert.match(user.content[0].text, /data sistem, jangan diragukan/);
+    assert.match(user.content[0].text, /ini foto apa\?/);
+    assert.ok(
+      user.content.some((part: any) => part.type === 'image_url' || part.type === 'image'),
+      'gambar harus tetap terlampir',
+    );
+  });
+});

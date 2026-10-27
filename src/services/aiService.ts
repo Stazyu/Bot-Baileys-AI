@@ -24,6 +24,7 @@ import {
   containsToolCallArtifact,
   stripToolCallArtifacts,
 } from "../utils/toolCallFilter.js";
+import { buildTurnContext } from "./systemPrompt.js";
 
 type Provider = "openai" | "openrouter" | "ollama" | "other";
 
@@ -426,6 +427,44 @@ export class AIService {
     return parts.length > 0 ? parts : userMessage;
   }
 
+  /**
+   * Build one user message, with the per-turn context block merged in.
+   *
+   * This is the cache-critical half of the prompt layout. The block is saved
+   * WITH the message in history, so on later turns it simply belongs to an
+   * older message — the prefix stays append-only and stays cacheable. If it
+   * were injected at request time without persisting, every turn would rewrite
+   * the previous user message and invalidate the cache instead.
+   *
+   * `senderName` is only meaningful in group chats (one sender per message);
+   * private chats pass none, so the block carries just the clock.
+   */
+  private buildUserTurn(
+    userMessage: string,
+    images: VisionImage[] | null | undefined,
+    contextOptions: { senderName?: string; now?: Date },
+  ): string | UserContentParts {
+    const block = buildTurnContext(contextOptions);
+    const content = this.buildUserContent(userMessage, images);
+
+    if (typeof content === "string") {
+      return `${content}${block}`;
+    }
+
+    // Parts form (vision): the block joins the user's own TEXT part, before the
+    // large base64 image parts — the same position as the string form, so both
+    // paths read identically to the model.
+    const parts: UserContentParts = [...content];
+    const firstText = parts.findIndex((part) => part.type === "text");
+    if (firstText === -1) {
+      parts.unshift({ type: "text", text: block.trimStart() });
+    } else {
+      const existing = parts[firstText] as TextPart;
+      parts[firstText] = { type: "text", text: `${existing.text}${block}` };
+    }
+    return parts;
+  }
+
   getProvider(): Provider {
     return this.provider;
   }
@@ -458,7 +497,10 @@ export class AIService {
       this.upsertSystemPrompt(messages, systemPrompt);
     }
 
-    messages.push({ role: "user", content: this.buildUserContent(userMessage, images) });
+    messages.push({
+      role: "user",
+      content: this.buildUserTurn(userMessage, images, {}),
+    });
 
     if (this.provider === "ollama") {
       return this.callOllamaNonStream(sessionId, messages);
@@ -516,7 +558,10 @@ export class AIService {
       this.upsertSystemPrompt(messages, systemPrompt);
     }
 
-    messages.push({ role: "user", content: this.buildUserContent(userMessage, images) });
+    messages.push({
+      role: "user",
+      content: this.buildUserTurn(userMessage, images, {}),
+    });
 
     if (this.provider === "ollama") {
       return this.callOllamaStream(sessionId, messages, onChunk);
@@ -552,7 +597,12 @@ export class AIService {
       this.upsertSystemPrompt(messages, systemPrompt);
     }
 
-    messages.push({ role: "user", content: this.buildUserContent(userMessage, images) });
+    messages.push({
+      role: "user",
+      content: this.buildUserTurn(userMessage, images, {
+        senderName: toolContext?.pushName,
+      }),
+    });
 
     const tools = toolRegistry.hasTools()
       ? this.buildAISDKTools(toolContext)
