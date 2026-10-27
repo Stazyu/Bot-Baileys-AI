@@ -212,3 +212,37 @@ test('log cache bisa di-grep dan tidak menyesatkan', () => {
   assert.match(line, /cached=1800\/2000 tok/);
   assert.equal(formatHitRate(metric), '90%');
 });
+
+test('tanggal boleh di system prompt, jam TIDAK', () => {
+  // Date changes once a day -> one cache miss per day is acceptable.
+  // Clock changes every minute -> must live in the per-message block.
+  const prompt = getGroupSystemPrompt('08:00', 'Budi', 'member', new Date('2026-10-27T10:00:00Z'));
+
+  assert.match(prompt, /\[TANGGAL\] Selasa, 27 Oktober 2026/, 'tanggal harus tersedia di prompt');
+  assert.doesNotMatch(prompt, /\d{2}:\d{2} WIB/, 'jam bocor ke system prompt -> cache batal tiap menit');
+});
+
+test('tanggal hanya berubah sekali sehari (bukan per jam)', () => {
+  const variants = new Set<string>();
+  // UTC hours chosen so the WIB (+7) date stays the SAME day: 07,11,15,19,23 WIB.
+  // (UTC 18:00 = 01:00 WIB the NEXT day and would legitimately flip the date.)
+  for (const hour of [0, 4, 8, 12, 16]) {
+    variants.add(
+      getSystemPrompt('member', new Date(`2026-10-27T${String(hour).padStart(2, '0')}:00:00Z`)),
+    );
+  }
+  assert.equal(variants.size, 1, 'system prompt berubah dalam hari yang sama -> cache batal');
+});
+
+test('tanggal berganti keesokan hari (satu cache miss per hari, disengaja)', () => {
+  const today = getSystemPrompt('member', new Date('2026-10-27T10:00:00Z'));
+  const tomorrow = getSystemPrompt('member', new Date('2026-10-28T10:00:00Z'));
+  assert.notEqual(today, tomorrow, 'tanggal harus ikut berganti tiap hari');
+  assert.match(tomorrow, /\[TANGGAL\] Rabu, 28 Oktober 2026/);
+});
+
+test('blok konteks tidak lagi memuat tanggal (hanya jam)', () => {
+  const block = buildTurnContext({ senderName: 'Budi', now: new Date('2026-10-27T10:00:00Z') });
+  assert.match(block, /Jam sekarang: 17:00 WIB/);
+  assert.doesNotMatch(block, /Oktober|2026/, 'tanggal tidak boleh diulang tiap pesan (menumpuk)');
+});

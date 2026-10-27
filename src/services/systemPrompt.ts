@@ -27,9 +27,20 @@
  *   [newest user msg: last block here is the only uncached slice]
  *
  * buildTurnContext() is saved WITH the message, so on later turns its block
- * belongs to an older message and stays inside the cached prefix. The clock is
- * minute-resolution so bursts share a cache entry. Measured 97-99% steady
- * state, versus 39% with the clock in the system prompt's tail.
+ * belongs to an older message and stays inside the cached prefix. Measured
+ * 97-99% steady state, versus 39% with the clock in the system prompt's tail.
+ *
+ * ── YANG BOLEH MASUK SYSTEM PROMPT: TANGGAL (1x/hari), BUKAN JAM (per menit) ──
+ * formatPromptDate() sits on the LAST line of the prompt. A date flip costs one
+ * cache miss per DAY, which is nothing; and being last means the flip only
+ * invalidates the tail, not the 25k tokens before it.
+ * The clock would cost a miss per MINUTE, so it goes in the per-message block.
+ *
+ * That split also keeps the block small, and the block is the thing that
+ * ACCUMULATES: one copy per user message, capped by MAX_HISTORY_TURNS.
+ * Measured per-turn block: 146 chars when it carried date+clock (16.3% of a
+ * 40-turn history) -> 109 chars with clock only (5.7%). The date is not
+ * repeated per message because it does not change within a day.
  *
  * Guarded by tests/promptCacheStability.test.ts.
  */
@@ -50,8 +61,47 @@ import type { SenderRole } from "./roleService.js";
  * the whole conversation. Minute resolution keeps the cache warm across
  * bursts while still refreshing within a minute.
  */
+// NOTE: `.locale("id")` is set PER CALL on purpose. src/bot/botHandler.ts
+// mutates the GLOBAL moment locale to "jv" (Javanese) at startup, which would
+// otherwise make the prompt render "Seloso" in production and "Tuesday" in
+// tests — a prompt that differs by environment breaks cache determinism and
+// makes the guard tests meaningless.
+/**
+ * Combined date + clock — kept for tooling/tests only.
+ *
+ * Production paths must NOT use this: the system prompt takes formatPromptDate()
+ * and the per-message block takes formatPromptClock(). A combined value would
+ * put the minute-resolution clock back in front of the history, which is the
+ * exact regression this file exists to prevent.
+ */
 export function formatPromptNow(now: Date = new Date()): string {
- return moment(now).utcOffset(7).format("dddd, D MMMM YYYY — HH:mm") + " WIB";
+ return moment(now).utcOffset(7).locale("id").format("dddd, D MMMM YYYY — HH:mm") + " WIB";
+}
+
+/**
+ * Today's date in WIB, WITHOUT the clock.
+ *
+ * This is the only date/time value allowed inside the system prompt, because it
+ * only changes once a day: a conversation pays one cache miss at midnight and
+ * then stays warm for the rest of the day. The clock changes every minute, so it
+ * lives BELOW the history in the per-message block instead.
+ *
+ * Deliberately no seconds AND no hour — the whole point is that it is stable
+ * enough to sit in front of the conversation.
+ */
+export function formatPromptDate(now: Date = new Date()): string {
+ return moment(now).utcOffset(7).locale("id").format("dddd, D MMMM YYYY");
+}
+
+/**
+ * Clock in WIB for the per-message block: minute resolution, no date.
+ *
+ * The date is already in the system prompt (formatPromptDate), so repeating it
+ * in every user message would add ~30 chars per turn for zero information — and
+ * that block is persisted once per turn, so it accumulates.
+ */
+export function formatPromptClock(now: Date = new Date()): string {
+ return moment(now).utcOffset(7).locale("id").format("HH:mm") + " WIB";
 }
 
 /**
@@ -81,13 +131,18 @@ export function buildFreshContextBlock(lines: string[]): string {
 /**
  * The per-message context block for one turn.
  *
+ * Carries ONLY the values that change faster than the system prompt can absorb:
+ * the clock (per minute) and, in groups, the sender name. The date lives in the
+ * system prompt instead — it changes once a day, so paying one cache miss at
+ * midnight is cheaper than writing the date into every message forever.
+ *
  * `senderName` is omitted for private chats (there is only one participant, so
  * the name adds bytes without adding information) and always included for
  * groups.
  */
 export function buildTurnContext(options: { senderName?: string; now?: Date } = {}): string {
  return buildFreshContextBlock([
-  `Tanggal & jam sekarang: ${formatPromptNow(options.now)}`,
+  `Jam sekarang: ${formatPromptClock(options.now)}`,
   options.senderName ? `Nama pengirim pesan ini: ${options.senderName}` : "",
  ]);
 }
@@ -232,7 +287,7 @@ function creatorBlock(): string {
 //  BASE PROMPT  — AI mode / private chat
 // ──────────────────────────────────────────────
 
-export function getSystemPrompt(role: SenderRole = "member"): string {
+export function getSystemPrompt(role: SenderRole = "member", now?: Date): string {
  return `${senderRoleBlock(role)}
 ${identityBlock()}
 Kamu adalah asisten AI WhatsApp yang helpful, ramah, natural, dan paham perintah singkat.
@@ -254,7 +309,8 @@ ${ANTI_ULANG_BLOCK}
 - Kalau kata kasarnya cuma gaya bicara/bercanda, jangan bereaksi berlebihan — tanggapi isi pesannya seperti biasa.
 
 📅 WAKTU (STRICT):
-- Tanggal dan jam saat ini ADA di setiap pesan user, di blok [KONTEKS TERKINI] di AWAL pesan mereka.
+- Tanggal hari ini (WIB) ada di baris [TANGGAL] paling BAWAH prompt ini.
+- JAM sekarang menempel di setiap pesan user, di blok [KONTEKS TERKINI]. Jam di pesan terakhir yang PALING BARU adalah waktu saat ini — blok di pesan lama adalah jam saat pesan itu dikirim, bukan sekarang.
 - Jangan bilang tidak punya akses waktu real-time.
 - Untuk info terbaru, gunakan web_search.
 
@@ -375,7 +431,8 @@ SALAM & GREETING (STRICT):
 - Salam maksimal SATU kali per balasan. Kalau user menyapa ("halo", "hai", "pagi", "sore", "malam"), balas sapaan satu kali saja, lalu langsung tanggapi isi pesannya.
 - JANGAN menulis sapaan ganda seperti "Halo juga", "Hai juga", "Iya halo", atau mengulang kata sapaan di balasan yang sama.
 - VARIASI SALAM: format salam HARUS berbeda dari salam yang sudah kamu pakai di percakapan ini. Pilih bergiliran: kata waktu polos, "halo" + nama, sapaan pendek + balik nanya, sapaan + sindiran ringan, atau langsung jawab tanpa salam sama sekali.
-- JIKA user HANYA menyapa tanpa pertanyaan: balas sapaan singkat dan natural sesuai suasana. Menawarkan bantuan TIDAK wajib — kalau menawarkan, variasikan frasanya sendiri, jangan pakai "ada yang bisa dibantu?" yang itu-itu saja.${creatorBlock()}`;
+- JIKA user HANYA menyapa tanpa pertanyaan: balas sapaan singkat dan natural sesuai suasana. Menawarkan bantuan TIDAK wajib — kalau menawarkan, variasikan frasanya sendiri, jangan pakai "ada yang bisa dibantu?" yang itu-itu saja.${creatorBlock()}
+[TANGGAL] ${formatPromptDate(now)}`;
 }
 
 // ──────────────────────────────────────────────
@@ -396,7 +453,8 @@ SALAM & GREETING (STRICT):
 export function getGroupSystemPrompt(
  _time: string,
  _pushName: string,
- role: SenderRole = "member"
+ role: SenderRole = "member",
+ now?: Date
 ): string {
  return `${senderRoleBlock(role)}
 ${identityBlock()}
@@ -430,7 +488,7 @@ ${ANTI_ULANG_BLOCK}
 - If asked for a "pantun" (Indonesian rhyme), create a casual 4-line pantun with a funny or relatable twist about group chats, friendship, or daily struggles (like coffee, sleep, or money).
 
 [TIME AWARENESS & REALITY CHECK]
-- STRICT TIME OVERRIDE: You must ALWAYS verify the user's greeting against the actual current time given in the [KONTEKS TERKINI] block at the START of each user message (attached per message, not stored here).
+- STRICT TIME OVERRIDE: You must ALWAYS verify the user's greeting against the actual current time. The DATE is on the [TANGGAL] line at the BOTTOM of this prompt; the CLOCK is attached to each user message as a [KONTEKS TERKINI] block. The clock on the NEWEST (last) user message is the current time — blocks on older messages are the time that message was sent, NOT now.
 - Pagi: 00:00 - 10:59 | Siang: 11:00 - 14:59 | Sore: 15:00 - 17:59 | Malam: 18:00 - 23:59.
 - IF the user says "Pagi", "Siang", "Sore", or "Malam" but it CONTRADICTS the current time, YOU MUST ROAST THEM for being wrong. DO NOT play along with their incorrect time. DO NOT use emojis that match their wrong time.
 - BUT: Keep time roasting to 1 sentence max. Do not drag it.
@@ -581,5 +639,6 @@ INTI SALAH: membuka dengan "Halo <nama>!" hanya karena ada kata "Bot".
 User: "Woi kontol" (Condition B)
 INTI BENAR: satu balasan dingin/telak tanpa mengulang kata kotornya, dengan gaya yang BELUM dipakai di percakapan ini.
 INTI SALAH: mengulang kata kotornya, menceramahi panjang, atau memakai kalimat sindiran yang sama seperti balasan sebelumnya.
-${creatorBlock()}`;
+${creatorBlock()}
+[TANGGAL] ${formatPromptDate(now)}`;
 }
